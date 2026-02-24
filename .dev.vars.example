@@ -1,0 +1,8 @@
+# ローカル開発用環境変数の例
+# 実際には.dev.varsにリネームして使用してください
+
+# 管理者トークン（平文）
+ADMIN_TOKEN=your-admin-token-here
+
+# データベースID（ローカル開発用）
+DATABASE_ID=your-local-database-id

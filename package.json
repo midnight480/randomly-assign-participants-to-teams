@@ -1,0 +1,19 @@
+{
+  "name": "random-team-drawer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create random-team-drawer-db-prod",
+    "db:migrate": "wrangler d1 migrations apply random-team-drawer-db-prod --remote",
+    "db:migrate:local": "wrangler d1 migrations apply random-team-drawer-db-prod --local",
+    "db:seed": "wrangler d1 execute random-team-drawer-db-prod --remote --file=./seed.sql",
+    "db:seed:local": "wrangler d1 execute random-team-drawer-db-prod --local --file=./seed.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.78.0"
+  }
+}

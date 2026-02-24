@@ -1,0 +1,356 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
+  background: #f5f5f5;
+  min-height: 100vh;
+  color: #333;
+}
+
+.container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+input::placeholder {
+  color: #999;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #2563eb;
+  color: #fff;
+}
+
+button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: #dc2626;
+  margin-top: 8px;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+button.secondary {
+  background: #64748b;
+}
+
+button.secondary:hover:not(:disabled) {
+  background: #475569;
+}
+
+.teams-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.team-card {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+  border-left: 4px solid #2563eb;
+}
+
+.team-card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.team-card .members {
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.team-card .members span {
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.result-card {
+  text-align: center;
+  padding: 32px 20px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 2px solid #2563eb;
+}
+
+.result-card .team-name,
+.result-card .result-message {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  margin: 8px 0;
+}
+
+.result-card .label {
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.error-msg {
+  color: #dc2626;
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 16px;
+}
+
+.admin-actions {
+  margin-top: 24px;
+}
+
+.admin-actions button {
+  margin-bottom: 8px;
+}
+
+.admin-actions button:last-child {
+  margin-bottom: 0;
+}
+
+.admin-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 8px;
+}
+.admin-preset-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  cursor: pointer;
+  margin: 0;
+}
+.admin-pattern-custom {
+  margin-bottom: 4px;
+}
+.admin-pattern-hint {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0 0 8px;
+}
+
+.loading {
+  text-align: center;
+  color: #64748b;
+  padding: 24px;
+}
+
+.nav-link {
+  display: inline-block;
+  margin-top: 16px;
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.nav-link:hover {
+  text-decoration: underline;
+}
+
+/* 抽選演出 */
+.draw-animation {
+  text-align: center;
+  padding: 40px 20px;
+  min-height: 120px;
+}
+.draw-animation .slot-text {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  letter-spacing: 0.1em;
+  min-height: 1.2em;
+}
+.draw-animation .dots::after {
+  content: "";
+  animation: dots 0.6s steps(4, end) infinite;
+}
+@keyframes dots {
+  0%, 20% { content: ""; }
+  40% { content: "."; }
+  60% { content: ".."; }
+  80%, 100% { content: "..."; }
+}
+.result-card.decide .team-name,
+.result-card.decide .result-message {
+  animation: pop 0.3s ease-out;
+}
+@keyframes pop {
+  0% { transform: scale(0.8); opacity: 0; }
+  70% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.result-card .decide-label {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #059669;
+  margin-bottom: 8px;
+  animation: pop 0.3s ease-out 0.1s both;
+}
+/* 紙吹雪風 */
+.result-card.confetti {
+  position: relative;
+  overflow: hidden;
+}
+.result-card.confetti::before,
+.result-card.confetti::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: rgba(37, 99, 235, 0.3);
+  border-radius: 50%;
+  top: 10%;
+  left: 15%;
+  animation: float 4s ease-in-out infinite;
+}
+.result-card.confetti::after {
+  left: auto;
+  right: 20%;
+  top: 20%;
+  animation-delay: 1s;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-10px) rotate(180deg); }
+}
+
+/* トースト */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: #059669;
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 1000;
+  opacity: 0;
+  transition: transform 0.3s, opacity 0.3s;
+}
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+/* モーダル（二段階確認） */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 16px;
+}
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 360px;
+  width: 100%;
+}
+.modal input.confirm-input {
+  margin-top: 12px;
+  letter-spacing: 0.05em;
+}
+
+/* 会場表示モード */
+.display-mode .container {
+  max-width: 720px;
+}
+.display-mode .team-card {
+  font-size: 1.05rem;
+}
+.display-mode .qr-wrap {
+  text-align: center;
+  padding: 16px;
+  background: #fff;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.display-mode .qr-wrap img {
+  display: block;
+  margin: 0 auto 8px;
+}
+.display-mode .pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@media (max-width: 400px) {
+  .container {
+    padding: 12px;
+  }
+  .result-card .team-name {
+    font-size: 1.75rem;
+  }
+}
