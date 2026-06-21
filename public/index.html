@@ -3,11 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>くじ引き - チーム割り当て</title>
+  <!-- FOUC 防止: 描画前に保存済みテーマを html に適用 -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div id="app"></div>
   <script src="/app.js"></script>
+  <!-- テーマ切替（自動 / ライト / ダーク）。app.js とは独立。 -->
+  <script>
+    (function () {
+      var ORDER = ["auto", "light", "dark"];
+      var LABEL = { auto: "🌓 自動", light: "☀️ ライト", dark: "🌙 ダーク" };
+      function current() {
+        var t = document.documentElement.getAttribute("data-theme");
+        return t === "light" || t === "dark" ? t : "auto";
+      }
+      function apply(mode) {
+        if (mode === "auto") {
+          document.documentElement.removeAttribute("data-theme");
+          try { localStorage.removeItem("theme"); } catch (e) {}
+        } else {
+          document.documentElement.setAttribute("data-theme", mode);
+          try { localStorage.setItem("theme", mode); } catch (e) {}
+        }
+        btn.textContent = LABEL[mode];
+        btn.setAttribute("aria-label", "テーマ: " + LABEL[mode]);
+      }
+      var btn = document.createElement("button");
+      btn.id = "themeToggle";
+      btn.type = "button";
+      document.body.appendChild(btn);
+      apply(current());
+      btn.addEventListener("click", function () {
+        var next = ORDER[(ORDER.indexOf(current()) + 1) % ORDER.length];
+        apply(next);
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -1,75 +1,209 @@
+/* =====================================================================
+   くじ引きアプリ スタイル（v0 デザイン移植 / 役割ベースのトークン）
+   - 既存のクラス名・DOM 構造はそのまま。色は下のトークンを上書きするだけで
+     テーマ差し替え可能（DESIGNS.md §5.1）。
+   - ライト/ダーク両対応（OS 追従 + 手動 data-theme 切替）。
+   - prefers-reduced-motion で演出を抑制。
+   ===================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ★ 役割ベースのパレット（ライト）。ここを上書きすればテーマを差し替えられる。
+     bg / surface / surface-muted / border / text / text-muted /
+     primary / primary-strong / accent / success / danger / warning */
+  --c-bg: oklch(0.985 0.012 75);
+  --c-surface: oklch(1 0 0);
+  --c-surface-muted: oklch(0.965 0.015 70);
+  --c-border: oklch(0.9 0.02 70);
+  --c-text: oklch(0.24 0.03 40);
+  --c-text-muted: oklch(0.52 0.03 50);
+  --c-primary: oklch(0.62 0.21 18);
+  --c-primary-foreground: oklch(0.99 0.01 80);
+  --c-primary-strong: oklch(0.52 0.21 18);
+  --c-accent: oklch(0.78 0.16 78);
+  --c-accent-foreground: oklch(0.28 0.05 60);
+  --c-success: oklch(0.6 0.15 155);
+  --c-danger: oklch(0.58 0.22 25);
+  --c-warning: oklch(0.62 0.16 70);
+
+  /* 角丸 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  /* エレベーション（影の段階） */
+  --shadow-1: 0 1px 2px oklch(0.2 0.03 40 / 0.06), 0 1px 3px oklch(0.2 0.03 40 / 0.08);
+  --shadow-2: 0 4px 12px oklch(0.2 0.03 40 / 0.1);
+  --shadow-3: 0 12px 32px oklch(0.2 0.03 40 / 0.16);
+
+  /* 余白（4px グリッド） */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
+
+  /* モーション */
+  --motion-fast: 150ms;
+  --motion-base: 250ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* タイポ */
+  --font-base: system-ui, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+               "Noto Sans JP", sans-serif;
+  --tap-min: 44px;
+}
+
+/* OS がダークのとき（手動でライト指定していなければ追従） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --c-bg: oklch(0.22 0.035 265);
+    --c-surface: oklch(0.27 0.04 265);
+    --c-surface-muted: oklch(0.32 0.04 265);
+    --c-border: oklch(0.42 0.04 265);
+    --c-text: oklch(0.96 0.01 260);
+    --c-text-muted: oklch(0.74 0.025 260);
+    --c-primary: oklch(0.68 0.2 20);
+    --c-primary-foreground: oklch(0.99 0.01 80);
+    --c-primary-strong: oklch(0.78 0.18 20);
+    --c-accent: oklch(0.82 0.16 80);
+    --c-accent-foreground: oklch(0.25 0.05 60);
+    --c-success: oklch(0.72 0.15 155);
+    --c-danger: oklch(0.7 0.2 25);
+    --c-warning: oklch(0.8 0.15 75);
+    --shadow-1: 0 1px 2px oklch(0 0 0 / 0.4);
+    --shadow-2: 0 4px 12px oklch(0 0 0 / 0.5);
+    --shadow-3: 0 12px 32px oklch(0 0 0 / 0.6);
+  }
+}
+
+/* 手動でダーク指定（OS 設定より優先） */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: oklch(0.22 0.035 265);
+  --c-surface: oklch(0.27 0.04 265);
+  --c-surface-muted: oklch(0.32 0.04 265);
+  --c-border: oklch(0.42 0.04 265);
+  --c-text: oklch(0.96 0.01 260);
+  --c-text-muted: oklch(0.74 0.025 260);
+  --c-primary: oklch(0.68 0.2 20);
+  --c-primary-foreground: oklch(0.99 0.01 80);
+  --c-primary-strong: oklch(0.78 0.18 20);
+  --c-accent: oklch(0.82 0.16 80);
+  --c-accent-foreground: oklch(0.25 0.05 60);
+  --c-success: oklch(0.72 0.15 155);
+  --c-danger: oklch(0.7 0.2 25);
+  --c-warning: oklch(0.8 0.15 75);
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-2: 0 4px 12px oklch(0 0 0 / 0.5);
+  --shadow-3: 0 12px 32px oklch(0 0 0 / 0.6);
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
-  background: #f5f5f5;
+  font-family: var(--font-base);
+  background: var(--c-bg);
   min-height: 100vh;
-  color: #333;
+  color: var(--c-text);
+  -webkit-font-smoothing: antialiased;
 }
 
 .container {
   max-width: 480px;
   margin: 0 auto;
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 h1 {
-  font-size: 1.5rem;
-  margin: 0 0 8px;
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  line-height: 1.2;
+  font-weight: 800;
+  margin: 0 0 var(--space-2);
+  letter-spacing: -0.01em;
 }
 
 .subtitle {
-  color: #666;
+  color: var(--c-text-muted);
   font-size: 0.9rem;
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
 }
 
 .card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+  box-shadow: var(--shadow-1);
 }
 
 label {
   display: block;
   font-size: 0.9rem;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-2);
+  color: var(--c-text);
 }
 
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+input[type="number"] {
   width: 100%;
   padding: 12px 14px;
   font-size: 1rem;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  margin-bottom: 16px;
+  color: var(--c-text);
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus {
+  outline: none;
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px oklch(from var(--c-primary) l c h / 0.25);
 }
 
 input::placeholder {
-  color: #999;
+  color: var(--c-text-muted);
+  opacity: 0.7;
 }
 
 button {
   width: 100%;
+  min-height: var(--tap-min);
   padding: 14px;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  background: #2563eb;
-  color: #fff;
+  background: var(--c-primary);
+  color: var(--c-primary-foreground);
+  box-shadow: var(--shadow-1);
+  transition: background var(--motion-fast), transform var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 button:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--c-primary-strong);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px oklch(from var(--c-primary) l c h / 0.45);
 }
 
 button:disabled {
@@ -78,90 +212,170 @@ button:disabled {
 }
 
 button.danger {
-  background: #dc2626;
-  margin-top: 8px;
+  background: var(--c-danger);
+  margin-top: var(--space-2);
 }
 
 button.danger:hover:not(:disabled) {
-  background: #b91c1c;
+  background: oklch(from var(--c-danger) calc(l - 0.06) c h);
 }
 
 button.secondary {
-  background: #64748b;
+  background: var(--c-surface-muted);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  box-shadow: none;
 }
 
 button.secondary:hover:not(:disabled) {
-  background: #475569;
+  background: oklch(from var(--c-surface-muted) calc(l - 0.04) c h);
 }
 
+/* ヒーロー化した「くじを引く」ボタン */
+#drawBtn {
+  position: relative;
+  overflow: hidden;
+  min-height: 56px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+}
+
+#drawBtn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, oklch(1 0 0 / 0.25) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: shimmer 2.6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+/* チーム一覧 */
 .teams-grid {
   display: grid;
-  gap: 12px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 
+/* チームごとに色相を割り当てる（色だけに依存せず名前ラベルは併記済み） */
 .team-card {
-  background: #f8fafc;
-  border-radius: 8px;
-  padding: 12px;
-  border-left: 4px solid #2563eb;
+  --team-hue: 18;
+  background: var(--c-surface-muted);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid oklch(0.65 0.17 var(--team-hue));
+  transition: transform var(--motion-fast), box-shadow var(--motion-fast);
 }
+
+.team-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-1);
+}
+
+.team-card:nth-child(8n + 1) { --team-hue: 18; }
+.team-card:nth-child(8n + 2) { --team-hue: 78; }
+.team-card:nth-child(8n + 3) { --team-hue: 150; }
+.team-card:nth-child(8n + 4) { --team-hue: 220; }
+.team-card:nth-child(8n + 5) { --team-hue: 300; }
+.team-card:nth-child(8n + 6) { --team-hue: 35; }
+.team-card:nth-child(8n + 7) { --team-hue: 190; }
+.team-card:nth-child(8n + 8) { --team-hue: 260; }
 
 .team-card h3 {
-  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
   font-size: 1rem;
+}
+
+/* 色相のドット（色覚多様性に配慮し、必ずチーム名と併記） */
+.team-card h3::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: oklch(0.65 0.17 var(--team-hue));
+  box-shadow: 0 0 0 3px oklch(0.65 0.17 var(--team-hue) / 0.18);
 }
 
 .team-card .members {
   font-size: 0.9rem;
-  color: #64748b;
+  color: var(--c-text-muted);
+  line-height: 1.7;
 }
 
 .team-card .members span {
   display: inline-block;
-  margin-right: 6px;
+  margin-right: var(--space-1);
+  padding: 1px 8px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-pill);
+  margin-bottom: var(--space-1);
 }
 
+/* 結果カード */
 .result-card {
   text-align: center;
-  padding: 32px 20px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border: 2px solid #2563eb;
+  padding: var(--space-8) var(--space-5);
+  background: linear-gradient(135deg,
+    oklch(from var(--c-primary) 0.96 0.04 h),
+    oklch(from var(--c-accent) 0.92 0.08 h));
+  border: 2px solid var(--c-primary);
+  border-radius: var(--radius-xl);
+}
+
+:root[data-theme="dark"] .result-card,
+:root:not([data-theme="light"]) .result-card {
+  background: linear-gradient(135deg,
+    oklch(from var(--c-primary) 0.32 0.08 h),
+    oklch(from var(--c-accent) 0.34 0.08 h));
 }
 
 .result-card .team-name,
 .result-card .result-message {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #1d4ed8;
-  margin: 8px 0;
+  font-size: clamp(1.5rem, 7vw, 2rem);
+  font-weight: 800;
+  color: var(--c-primary-strong);
+  margin: var(--space-2) 0;
+  line-height: 1.25;
 }
 
 .result-card .label {
   font-size: 0.9rem;
-  color: #64748b;
+  color: var(--c-text-muted);
 }
 
 .error-msg {
-  color: #dc2626;
+  color: var(--c-danger);
   font-size: 0.9rem;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .status-bar {
   display: flex;
   justify-content: space-between;
+  gap: var(--space-2);
   font-size: 0.85rem;
-  color: #64748b;
-  margin-bottom: 16px;
+  color: var(--c-text-muted);
+  margin-bottom: var(--space-4);
 }
 
 .admin-actions {
-  margin-top: 24px;
+  margin-top: var(--space-6);
 }
 
 .admin-actions button {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .admin-actions button:last-child {
@@ -172,7 +386,7 @@ button.secondary:hover:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .admin-preset-label {
   display: inline-flex;
@@ -183,26 +397,28 @@ button.secondary:hover:not(:disabled) {
   margin: 0;
 }
 .admin-pattern-custom {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 .admin-pattern-hint {
   font-size: 0.8rem;
-  color: #64748b;
-  margin: 0 0 8px;
+  color: var(--c-text-muted);
+  margin: 0 0 var(--space-2);
 }
 
 .loading {
   text-align: center;
-  color: #64748b;
-  padding: 24px;
+  color: var(--c-text-muted);
+  padding: var(--space-6);
 }
 
 .nav-link {
   display: inline-block;
-  margin-top: 16px;
-  color: #2563eb;
+  margin-top: var(--space-4);
+  margin-right: var(--space-4);
+  color: var(--c-primary);
   text-decoration: none;
   font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .nav-link:hover {
@@ -212,14 +428,14 @@ button.secondary:hover:not(:disabled) {
 /* 抽選演出 */
 .draw-animation {
   text-align: center;
-  padding: 40px 20px;
+  padding: var(--space-8) var(--space-5);
   min-height: 120px;
 }
 .draw-animation .slot-text {
-  font-size: 2.5rem;
-  font-weight: 700;
-  color: #1d4ed8;
-  letter-spacing: 0.1em;
+  font-size: clamp(2rem, 9vw, 2.5rem);
+  font-weight: 800;
+  color: var(--c-primary-strong);
+  letter-spacing: 0.05em;
   min-height: 1.2em;
 }
 .draw-animation .dots::after {
@@ -234,19 +450,20 @@ button.secondary:hover:not(:disabled) {
 }
 .result-card.decide .team-name,
 .result-card.decide .result-message {
-  animation: pop 0.3s ease-out;
+  animation: pop 0.45s var(--ease-out);
 }
 @keyframes pop {
-  0% { transform: scale(0.8); opacity: 0; }
-  70% { transform: scale(1.05); }
-  100% { transform: scale(1); opacity: 1; }
+  0% { transform: scale(0.4); opacity: 0; }
+  55% { transform: scale(1.12); opacity: 1; }
+  75% { transform: scale(0.96); }
+  100% { transform: scale(1); }
 }
 .result-card .decide-label {
   font-size: 1rem;
-  font-weight: 700;
-  color: #059669;
-  margin-bottom: 8px;
-  animation: pop 0.3s ease-out 0.1s both;
+  font-weight: 800;
+  color: var(--c-success);
+  margin-bottom: var(--space-2);
+  animation: pop 0.45s var(--ease-out) 0.1s both;
 }
 /* 紙吹雪風 */
 .result-card.confetti {
@@ -259,7 +476,8 @@ button.secondary:hover:not(:disabled) {
   position: absolute;
   width: 8px;
   height: 8px;
-  background: rgba(37, 99, 235, 0.3);
+  background: var(--c-primary);
+  opacity: 0.4;
   border-radius: 50%;
   top: 10%;
   left: 15%;
@@ -269,6 +487,7 @@ button.secondary:hover:not(:disabled) {
   left: auto;
   right: 20%;
   top: 20%;
+  background: var(--c-accent);
   animation-delay: 1s;
 }
 @keyframes float {
@@ -279,18 +498,19 @@ button.secondary:hover:not(:disabled) {
 /* トースト */
 .toast {
   position: fixed;
-  bottom: 24px;
+  bottom: var(--space-6);
   left: 50%;
   transform: translateX(-50%) translateY(80px);
-  background: #059669;
-  color: #fff;
+  background: var(--c-success);
+  color: oklch(0.99 0.01 150);
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.9rem;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  font-weight: 600;
+  box-shadow: var(--shadow-2);
   z-index: 1000;
   opacity: 0;
-  transition: transform 0.3s, opacity 0.3s;
+  transition: transform var(--motion-base), opacity var(--motion-base);
 }
 .toast.show {
   transform: translateX(-50%) translateY(0);
@@ -301,56 +521,97 @@ button.secondary:hover:not(:disabled) {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: oklch(0 0 0 / 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 999;
-  padding: 16px;
+  padding: var(--space-4);
 }
 .modal {
-  background: #fff;
-  border-radius: 12px;
-  padding: 24px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
   max-width: 360px;
   width: 100%;
+  box-shadow: var(--shadow-3);
 }
 .modal input.confirm-input {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   letter-spacing: 0.05em;
 }
 
 /* 会場表示モード */
 .display-mode .container {
-  max-width: 720px;
+  max-width: 1024px;
+}
+.display-mode h1 {
+  font-size: clamp(2rem, 7vw, 3.5rem);
 }
 .display-mode .team-card {
-  font-size: 1.05rem;
+  font-size: 1.2rem;
+  padding: var(--space-4) var(--space-5);
+}
+.display-mode .team-card h3 {
+  font-size: 1.3rem;
 }
 .display-mode .qr-wrap {
   text-align: center;
-  padding: 16px;
+  padding: var(--space-4);
+  /* QR は暗背景でも読めるよう常に白地（反転させない） */
   background: #fff;
-  border-radius: 12px;
-  margin-bottom: 16px;
+  color: #1a1a1a;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
 }
 .display-mode .qr-wrap img {
   display: block;
   margin: 0 auto 8px;
 }
 .display-mode .pulse {
-  animation: pulse 2s ease-in-out infinite;
+  animation: pulse 2.4s ease-in-out infinite;
 }
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.04); opacity: 0.92; }
+}
+
+/* テーマ切替ボタン（index.html のスクリプトが body に挿入） */
+#themeToggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--shadow-1);
+  z-index: 1001;
+}
+#themeToggle:hover:not(:disabled) {
+  background: var(--c-surface-muted);
+}
+
+/* 動き低減: 演出を抑制 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 @media (max-width: 400px) {
   .container {
-    padding: 12px;
-  }
-  .result-card .team-name {
-    font-size: 1.75rem;
+    padding: var(--space-3);
   }
 }
