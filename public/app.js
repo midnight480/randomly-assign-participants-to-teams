@@ -293,7 +293,7 @@
             <label class="admin-inline-label">参加人数（総枠） <input type="number" id="adminTotalSlots" min="1" value="${(currentPattern.teams || []).reduce((s, t) => s + (t.size || 0), 0) || 18}" style="width:4em" /></label>
           </div>
           <p class="admin-pattern-hint" style="margin-top:0">上記を変更すると下の「カスタム」に均等配分で反映されます。既に割り当て済みの人数より少ない総枠にはできません。</p>
-          ${(event.assigned_count || 0) > 0 ? `<p class="admin-pattern-hint" style="color:#b45309">現在 ${event.assigned_count} 名割り当て済みです。総枠は ${event.assigned_count} 名以上にしてください。</p>` : ""}
+          ${(event.assigned_count || 0) > 0 ? `<p class="admin-pattern-hint" style="color:var(--c-warning)">現在 ${event.assigned_count} 名割り当て済みです。総枠は ${event.assigned_count} 名以上にしてください。</p>` : ""}
           <label style="margin-top:12px">チーム構成（プリセット or カスタム）</label>
           <div class="admin-presets" id="adminPresets">
             ${PRESETS.map((p, i) => {
@@ -410,7 +410,7 @@
       if (!token) {
         adminSettingMessage.textContent = "管理者トークンを先に入力してください";
         adminSettingMessage.style.display = "block";
-        adminSettingMessage.style.color = "#dc2626";
+        adminSettingMessage.style.color = "var(--c-danger)";
         return;
       }
       const title = adminEventTitle.value.trim().slice(0, 200);
@@ -418,7 +418,7 @@
       if (!pattern || !pattern.teams.length) {
         adminSettingMessage.textContent = "チーム構成を正しく入力してください（例: 4,4,5,5）";
         adminSettingMessage.style.display = "block";
-        adminSettingMessage.style.color = "#dc2626";
+        adminSettingMessage.style.color = "var(--c-danger)";
         return;
       }
       adminSettingMessage.style.display = "none";
@@ -436,7 +436,7 @@
         if (!res.ok) {
           adminSettingMessage.textContent = data.error || "保存に失敗しました";
           adminSettingMessage.style.display = "block";
-          adminSettingMessage.style.color = "#dc2626";
+          adminSettingMessage.style.color = "var(--c-danger)";
           return;
         }
         showToast("イベント設定を保存しました");
@@ -445,7 +445,7 @@
       } catch (e) {
         adminSettingMessage.textContent = e.message || "エラーが発生しました";
         adminSettingMessage.style.display = "block";
-        adminSettingMessage.style.color = "#dc2626";
+        adminSettingMessage.style.color = "var(--c-danger)";
       } finally {
         adminSaveEvent.disabled = false;
       }
@@ -454,7 +454,7 @@
     function setMessage(msg, isError) {
       adminMessage.textContent = msg;
       adminMessage.style.display = msg ? "block" : "none";
-      adminMessage.style.color = isError ? "#dc2626" : "#059669";
+      adminMessage.style.color = isError ? "var(--c-danger)" : "var(--c-success)";
     }
 
     function loadStatus() {
@@ -534,7 +534,7 @@
       overlay.innerHTML = `
         <div class="modal">
           <p style="font-weight:600; margin:0 0 8px">${escapeHtml(title)}</p>
-          <p style="margin:0; font-size:0.9rem; color:#666">${escapeHtml(body)}</p>
+          <p style="margin:0; font-size:0.9rem; color:var(--c-text-muted)">${escapeHtml(body)}</p>
           <label for="${inputId}" style="margin-top:12px; display:block">「${escapeHtml(confirmText)}」と入力してください</label>
           <input type="text" id="${inputId}" class="confirm-input" placeholder="${escapeHtml(confirmText)}" autocomplete="off" />
           <div style="margin-top:16px; display:flex; gap:8px">
