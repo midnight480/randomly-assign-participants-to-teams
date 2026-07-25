@@ -10,6 +10,9 @@ yarn.lock
 # Build outputs
 dist/
 build/
+cdk.out/
+*.db
+*.db-journal
 
 # OS files
 .DS_Store

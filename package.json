@@ -2,18 +2,26 @@
   "name": "random-team-drawer",
   "version": "1.0.0",
   "private": true,
+  "main": "dist/handler.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:create": "wrangler d1 create random-team-drawer-db-prod",
-    "db:migrate": "wrangler d1 migrations apply random-team-drawer-db-prod --remote",
-    "db:migrate:local": "wrangler d1 migrations apply random-team-drawer-db-prod --local",
-    "db:seed": "wrangler d1 execute random-team-drawer-db-prod --remote --file=./seed.sql",
-    "db:seed:local": "wrangler d1 execute random-team-drawer-db-prod --local --file=./seed.sql"
+    "build": "prisma generate && tsc",
+    "cdk": "cdk",
+    "cdk:deploy": "npm run build && cdk deploy --require-approval never"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.700.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.700.0",
+    "@prisma/client": "^5.22.0",
+    "aws-jwt-verify": "^4.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241127.0",
-    "typescript": "^5.3.3",
-    "wrangler": "^3.78.0"
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^20.17.0",
+    "aws-cdk": "^2.170.0",
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.3.0",
+    "esbuild": "^0.24.0",
+    "prisma": "^5.22.0",
+    "typescript": "^5.3.3"
   }
 }

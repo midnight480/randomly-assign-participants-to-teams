@@ -599,6 +599,43 @@ button.secondary:hover:not(:disabled) {
   background: var(--c-surface-muted);
 }
 
+/* AI Bedrock Team Comment */
+.ai-comment-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  background: oklch(0.96 0.04 85);
+  color: oklch(0.35 0.1 50);
+  border: 1px dashed oklch(0.8 0.1 80);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  margin-top: 10px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.ai-comment-badge .icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* Admin Area */
+.admin-card {
+  border-left: 4px solid var(--c-primary);
+}
+.textarea-names {
+  width: 100%;
+  height: 140px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-bg);
+  color: var(--c-text);
+  margin-bottom: var(--space-3);
+  resize: vertical;
+}
+
 /* 動き低減: 演出を抑制 */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -615,3 +652,4 @@ button.secondary:hover:not(:disabled) {
     padding: var(--space-3);
   }
 }
+
