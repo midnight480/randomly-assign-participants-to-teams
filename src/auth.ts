@@ -3,27 +3,24 @@ import { CognitoJwtVerifier } from "aws-jwt-verify";
 const userPoolId = process.env.USER_POOL_ID;
 const clientId = process.env.USER_POOL_CLIENT_ID;
 
-let verifier: ReturnType<typeof CognitoJwtVerifier.create> | null = null;
+const verifier =
+  userPoolId && clientId
+    ? CognitoJwtVerifier.create({ userPoolId, tokenUse: "id", clientId })
+    : null;
 
-if (userPoolId && clientId) {
-  verifier = CognitoJwtVerifier.create({
-    userPoolId,
-    tokenUse: "id",
-    clientId,
-  });
-}
-
+/**
+ * 管理者操作用の Cognito ID トークン検証。
+ * Cognito が未設定の場合は「誰でも通る」のではなく必ず拒否する（fail closed）。
+ */
 export async function verifyAdminToken(tokenHeader: string | null): Promise<boolean> {
   if (!tokenHeader) return false;
 
-  const token = tokenHeader.startsWith("Bearer ")
-    ? tokenHeader.slice(7)
-    : tokenHeader;
-
-  // Local fallback if Cognito isn't set up yet
   if (!verifier) {
-    return token.trim().length > 0;
+    console.error("USER_POOL_ID / USER_POOL_CLIENT_ID が未設定のため認証を拒否しました");
+    return false;
   }
+
+  const token = tokenHeader.startsWith("Bearer ") ? tokenHeader.slice(7) : tokenHeader;
 
   try {
     const payload = await verifier.verify(token);

@@ -1,14 +1,8 @@
-import { generateTeamComments } from "./bedrock";
+import { generateTeamComments } from "./comments";
 import { verifyAdminToken } from "./auth";
 import { publishShuffleEvent } from "./events";
-import {
-  getOrCreateEventState,
-  saveEventState,
-  addParticipant,
-  getParticipants,
-  clearParticipants,
-} from "./db";
-import { parsePattern, normalizeDisplayName, jsonResponse, errorResponse } from "./util";
+import { getEventState, saveEventState, setParticipants, Team } from "./db";
+import { normalizeDisplayName, jsonResponse, errorResponse } from "./util";
 
 export const SAGA_WORDS = [
   "がばい",
@@ -63,38 +57,25 @@ export function pickRandomSagaNames(n: number, fromWords: string[] = SAGA_WORDS)
 }
 
 export async function handleGetEvent(eventCode: string): Promise<Response> {
-  const state = await getOrCreateEventState(eventCode);
-  const pattern = parsePattern(state.patternJson) || { teams: [] };
+  const state = await getEventState(eventCode);
 
-  let teams: { name: string; size: number; members: string[]; comment?: string }[] = [];
-  try {
-    teams = JSON.parse(state.teamsJson);
-  } catch {}
-
-  let comments: Record<string, string> = {};
-  try {
-    comments = JSON.parse(state.commentsJson);
-  } catch {}
-
-  // Attach comments to teams
-  teams = teams.map((t) => ({
+  const teams = state.teams.map((t) => ({
     ...t,
-    comment: comments[t.name] || "",
+    comment: state.comments[t.name] || "",
   }));
 
-  const allParticipants = await getParticipants(eventCode);
   const totalAssigned = teams.reduce((acc, t) => acc + (t.members ? t.members.length : 0), 0);
 
   return jsonResponse({
     event_code: state.eventCode,
     title: state.title,
-    pattern,
+    pattern: state.pattern,
     teams,
-    comments,
+    comments: state.comments,
     total_slots: teams.reduce((acc, t) => acc + t.size, 0),
     assigned_count: totalAssigned,
-    participant_count: allParticipants.length,
-    participants: allParticipants.map((p) => p.displayName),
+    participant_count: state.participants.length,
+    participants: state.participants,
     updated_at: state.updatedAt,
   });
 }
@@ -108,13 +89,20 @@ export async function handlePostParticipants(
     return errorResponse("参加者名を入力してください", 400);
   }
 
+  const state = await getEventState(eventCode);
+  const existing = new Set(state.participants);
   const added: string[] = [];
+
   for (const raw of rawNames) {
     const name = normalizeDisplayName(raw);
-    if (name) {
-      await addParticipant(eventCode, name);
+    if (name && !existing.has(name)) {
+      existing.add(name);
       added.push(name);
     }
+  }
+
+  if (added.length > 0) {
+    await setParticipants(eventCode, [...state.participants, ...added]);
   }
 
   return jsonResponse({
@@ -137,7 +125,7 @@ export async function handleExecuteShuffle(
     return errorResponse("管理者権限が必要です (Cognito Token Invalid)", 401);
   }
 
-  const state = await getOrCreateEventState(eventCode);
+  const state = await getEventState(eventCode);
 
   // 1. Gather participants
   let participants: string[] = [];
@@ -145,15 +133,8 @@ export async function handleExecuteShuffle(
     participants = body.participant_names
       .map((n) => normalizeDisplayName(n))
       .filter(Boolean);
-
-    // Update DB list of participants
-    await clearParticipants(eventCode);
-    for (const p of participants) {
-      await addParticipant(eventCode, p);
-    }
   } else {
-    const dbParticipants = await getParticipants(eventCode);
-    participants = dbParticipants.map((p) => p.displayName);
+    participants = state.participants;
   }
 
   if (participants.length === 0) {
@@ -180,7 +161,7 @@ export async function handleExecuteShuffle(
   const baseSize = Math.floor(shuffledNames.length / teamCount);
   const remainder = shuffledNames.length % teamCount;
 
-  const teams: { name: string; size: number; members: string[] }[] = [];
+  const teams: Team[] = [];
   let memberIdx = 0;
 
   for (let i = 0; i < teamCount; i++) {
@@ -195,29 +176,24 @@ export async function handleExecuteShuffle(
     });
   }
 
-  // 4. Generate Bedrock team comments (with fallback catch)
-  const comments = await generateTeamComments(teams);
+  // 4. Attach a Saga-dialect comment per team
+  const comments = generateTeamComments(teams);
 
-  // 5. Save to Prisma DB
-  const patternJson = JSON.stringify({
-    teams: teams.map((t) => ({ name: t.name, size: t.size })),
-  });
-  const teamsJson = JSON.stringify(teams);
-  const commentsJson = JSON.stringify(comments);
-
-  await saveEventState(eventCode, {
-    patternJson,
-    teamsJson,
-    commentsJson,
+  // 5. Persist
+  const saved = await saveEventState(eventCode, {
+    participants,
+    pattern: { teams: teams.map((t) => ({ name: t.name, size: t.size })) },
+    teams,
+    comments,
   });
 
   const responsePayload = {
-    event_code: state.eventCode,
-    title: state.title,
+    event_code: saved.eventCode,
+    title: saved.title,
     teams: teams.map((t) => ({ ...t, comment: comments[t.name] || "" })),
     comments,
     assigned_count: participants.length,
-    updated_at: new Date().toISOString(),
+    updated_at: saved.updatedAt,
   };
 
   // 6. Publish AppSync Event for real-time update
@@ -238,17 +214,18 @@ export async function handleResetAssignments(
     return errorResponse("管理者権限が必要です", 401);
   }
 
-  await saveEventState(eventCode, {
-    teamsJson: JSON.stringify([]),
-    commentsJson: JSON.stringify({}),
+  const saved = await saveEventState(eventCode, {
+    pattern: { teams: [] },
+    teams: [],
+    comments: {},
   });
 
   const responsePayload = {
-    event_code: eventCode,
+    event_code: saved.eventCode,
     teams: [],
     comments: {},
     assigned_count: 0,
-    updated_at: new Date().toISOString(),
+    updated_at: saved.updatedAt,
   };
 
   await publishShuffleEvent(eventCode, responsePayload);

@@ -1,192 +1,226 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
+import type {
+  APIGatewayProxyEventV2,
+  APIGatewayProxyStructuredResultV2,
+} from "aws-lambda";
 import {
   handleGetEvent,
   handlePostParticipants,
   handleExecuteShuffle,
   handleResetAssignments,
 } from "./api";
-import { jsonResponse, errorResponse } from "./util";
-import { CognitoIdentityProviderClient, InitiateAuthCommand } from "@aws-sdk/client-cognito-identity-provider";
+import {
+  CognitoIdentityProviderClient,
+  InitiateAuthCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import * as fs from "fs";
 import * as path from "path";
 
-const cognitoClient = new CognitoIdentityProviderClient({
-  region: process.env.AWS_REGION || "us-east-1",
-});
+const cognitoClient = new CognitoIdentityProviderClient({});
 
-const STATIC_DIR = path.join(__dirname, "../public");
+/**
+ * NodejsFunction は esbuild の出力を /var/task 直下に置き、
+ * commandHooks で public/ を同じ階層にコピーする。
+ * ローカル実行 (dist/handler.js) では一つ上に public/ がある。
+ */
+const STATIC_DIR = [
+  path.join(__dirname, "public"),
+  path.join(__dirname, "..", "public"),
+].find((p) => fs.existsSync(p)) ?? path.join(__dirname, "public");
 
-function getMimeType(filePath: string): string {
-  if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
-  if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
-  if (filePath.endsWith(".js")) return "application/javascript; charset=utf-8";
-  if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
-  if (filePath.endsWith(".png")) return "image/png";
-  if (filePath.endsWith(".svg")) return "image/svg+xml";
-  return "text/plain; charset=utf-8";
+const TEXT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+const BINARY_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+function json(statusCode: number, body: unknown): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    body: JSON.stringify(body),
+  };
 }
 
-export async function handler(
-  event: APIGatewayProxyEvent
-): Promise<APIGatewayProxyResult> {
-  const httpMethod = event.httpMethod || "GET";
-  const requestPath = event.path || "/";
+/**
+ * STATIC_DIR の外に出るパスを弾く。API Gateway は正規化してくれるが、
+ * %2e%2e などで抜けられないよう自前でも確認する。
+ */
+function resolveStaticPath(relativePath: string): string | null {
+  const candidate = path.resolve(STATIC_DIR, relativePath);
+  const root = path.resolve(STATIC_DIR);
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
+    return null;
+  }
+  return candidate;
+}
 
-  // Handle API Endpoints
-  if (requestPath.startsWith("/api/")) {
-    try {
-      const authHeader =
-        event.headers?.Authorization ||
-        event.headers?.authorization ||
-        event.headers?.["X-Admin-Token"] ||
-        event.headers?.["x-admin-token"] ||
-        null;
+function serveStatic(requestPath: string): APIGatewayProxyStructuredResultV2 {
+  let relativePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\/+/, "");
 
-      // Auth endpoint for Admin Login with Cognito
-      if (requestPath === "/api/auth/login" && httpMethod === "POST") {
-        const body = JSON.parse(event.body || "{}");
-        const { email, password } = body;
-
-        const clientId = process.env.USER_POOL_CLIENT_ID;
-        if (!clientId) {
-          return {
-            statusCode: 500,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ error: "Cognito User Pool Client not configured" }),
-          };
-        }
-
-        const command = new InitiateAuthCommand({
-          AuthFlow: "USER_PASSWORD_AUTH",
-          ClientId: clientId,
-          AuthParameters: {
-            USERNAME: email,
-            PASSWORD: password,
-          },
-        });
-
-        const authResult = await cognitoClient.send(command);
-        const idToken = authResult.AuthenticationResult?.IdToken;
-        const accessToken = authResult.AuthenticationResult?.AccessToken;
-
-        if (!idToken) {
-          return {
-            statusCode: 401,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ error: "Cognito login failed" }),
-          };
-        }
-
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: idToken,
-            accessToken,
-            user: { email },
-          }),
-        };
-      }
-
-      // Config endpoint for frontend (Cognito & AppSync settings)
-      if (requestPath === "/api/config" && httpMethod === "GET") {
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userPoolId: process.env.USER_POOL_ID || "",
-            userPoolClientId: process.env.USER_POOL_CLIENT_ID || "",
-            appsyncEndpoint: process.env.APPSYNC_HTTP_ENDPOINT || "",
-            appsyncApiKey: process.env.APPSYNC_API_KEY || "",
-          }),
-        };
-      }
-
-      const segments = requestPath.slice(4).split("/").filter(Boolean);
-      const eventCode = segments[1] ? decodeURIComponent(segments[1]) : "JAWS-SAGA";
-
-      if (segments[0] === "events") {
-        if (segments.length <= 2 && httpMethod === "GET") {
-          const res = await handleGetEvent(eventCode);
-          return await formatResponse(res);
-        }
-
-        if (segments.length === 3 && segments[2] === "participants" && httpMethod === "POST") {
-          const body = JSON.parse(event.body || "{}");
-          const res = await handlePostParticipants(eventCode, body);
-          return await formatResponse(res);
-        }
-
-        if (segments.length >= 3 && segments[2] === "admin") {
-          const action = segments[3];
-          const body = JSON.parse(event.body || "{}");
-
-          if (action === "shuffle" && httpMethod === "POST") {
-            const res = await handleExecuteShuffle(eventCode, authHeader, body);
-            return await formatResponse(res);
-          }
-
-          if (action === "reset" && httpMethod === "POST") {
-            const res = await handleResetAssignments(eventCode, authHeader);
-            return await formatResponse(res);
-          }
-        }
-      }
-
-      return {
-        statusCode: 404,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "API Endpoint Not Found" }),
-      };
-    } catch (err: any) {
-      console.error("API Error:", err);
-      return {
-        statusCode: 500,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: err.message || "Internal Server Error" }),
-      };
-    }
+  // /e/* は SPA ルーティングなので index.html を返す
+  if (relativePath === "" || relativePath.startsWith("e/")) {
+    relativePath = "index.html";
   }
 
-  // Serve Static Frontend Assets
-  let relativePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\//, "");
-  if (relativePath.startsWith("e/")) {
-    relativePath = "index.html"; // Single-page app routing for /e/*
-  }
-
-  let filePath = path.join(STATIC_DIR, relativePath);
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+  let filePath = resolveStaticPath(relativePath);
+  if (!filePath || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     filePath = path.join(STATIC_DIR, "index.html");
   }
 
-  if (fs.existsSync(filePath)) {
-    const content = fs.readFileSync(filePath, "utf-8");
+  if (!fs.existsSync(filePath)) {
+    return {
+      statusCode: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: "Not Found",
+    };
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const binaryType = BINARY_TYPES[ext];
+
+  if (binaryType) {
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": getMimeType(filePath),
-        "Cache-Control": "public, max-age=300",
-      },
-      body: content,
+      headers: { "Content-Type": binaryType, "Cache-Control": "public, max-age=300" },
+      body: fs.readFileSync(filePath).toString("base64"),
+      isBase64Encoded: true,
     };
   }
 
   return {
-    statusCode: 404,
-    headers: { "Content-Type": "text/plain" },
-    body: "Not Found",
+    statusCode: 200,
+    headers: {
+      "Content-Type": TEXT_TYPES[ext] || "text/plain; charset=utf-8",
+      // index.html はキャッシュさせない（デプロイ直後に古い画面が出るのを防ぐ）
+      "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=300",
+    },
+    body: fs.readFileSync(filePath, "utf-8"),
   };
 }
 
-async function formatResponse(res: Response): Promise<APIGatewayProxyResult> {
+async function toResult(res: Response): Promise<APIGatewayProxyStructuredResultV2> {
   const bodyText = await res.text();
   const headers: Record<string, string> = {};
   res.headers.forEach((v, k) => {
     headers[k] = v;
   });
-  return {
-    statusCode: res.status,
-    headers,
-    body: bodyText,
-  };
+  return { statusCode: res.status, headers, body: bodyText };
+}
+
+async function handleLogin(rawBody: string): Promise<APIGatewayProxyStructuredResultV2> {
+  const { email, password } = JSON.parse(rawBody || "{}");
+  const clientId = process.env.USER_POOL_CLIENT_ID;
+
+  if (!clientId) {
+    return json(500, { error: "Cognito User Pool Client not configured" });
+  }
+
+  try {
+    const authResult = await cognitoClient.send(
+      new InitiateAuthCommand({
+        AuthFlow: "USER_PASSWORD_AUTH",
+        ClientId: clientId,
+        AuthParameters: { USERNAME: email, PASSWORD: password },
+      })
+    );
+
+    if (authResult.ChallengeName) {
+      // 恒久パスワードが設定されていれば起きないが、念のため理由を返す
+      return json(401, {
+        error: `追加の認証チャレンジが必要です (${authResult.ChallengeName})`,
+      });
+    }
+
+    const idToken = authResult.AuthenticationResult?.IdToken;
+    if (!idToken) {
+      return json(401, { error: "ログインに失敗しました" });
+    }
+
+    return json(200, { token: idToken, user: { email } });
+  } catch (err: any) {
+    console.error("Cognito login failed:", err);
+    return json(401, { error: "メールアドレスまたはパスワードが正しくありません" });
+  }
+}
+
+export async function handler(
+  event: APIGatewayProxyEventV2
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const httpMethod = event.requestContext?.http?.method || "GET";
+  const requestPath = event.rawPath || "/";
+  const rawBody = event.isBase64Encoded && event.body
+    ? Buffer.from(event.body, "base64").toString("utf-8")
+    : event.body || "";
+
+  if (!requestPath.startsWith("/api/")) {
+    return serveStatic(requestPath);
+  }
+
+  try {
+    // API Gateway v2 のヘッダキーは小文字に正規化される
+    const authHeader =
+      event.headers?.authorization || event.headers?.["x-admin-token"] || null;
+
+    if (requestPath === "/api/auth/login" && httpMethod === "POST") {
+      return await handleLogin(rawBody);
+    }
+
+    if (requestPath === "/api/config" && httpMethod === "GET") {
+      return json(200, {
+        userPoolId: process.env.USER_POOL_ID || "",
+        userPoolClientId: process.env.USER_POOL_CLIENT_ID || "",
+        appsyncHttpEndpoint: process.env.APPSYNC_HTTP_ENDPOINT || "",
+        appsyncRealtimeEndpoint: process.env.APPSYNC_REALTIME_ENDPOINT || "",
+        appsyncApiKey: process.env.APPSYNC_API_KEY || "",
+        appsyncChannel: process.env.APPSYNC_CHANNEL || "/team-drawer/shuffle",
+      });
+    }
+
+    // /api/events/{code}/...
+    const segments = requestPath.replace(/^\/api\//, "").split("/").filter(Boolean);
+    const eventCode = segments[1] ? decodeURIComponent(segments[1]) : "JAWS-SAGA";
+
+    if (segments[0] === "events") {
+      if (segments.length <= 2 && httpMethod === "GET") {
+        return await toResult(await handleGetEvent(eventCode));
+      }
+
+      if (segments.length === 3 && segments[2] === "participants" && httpMethod === "POST") {
+        return await toResult(
+          await handlePostParticipants(eventCode, JSON.parse(rawBody || "{}"))
+        );
+      }
+
+      if (segments.length >= 3 && segments[2] === "admin" && httpMethod === "POST") {
+        const action = segments[3];
+        const body = JSON.parse(rawBody || "{}");
+
+        if (action === "shuffle") {
+          return await toResult(await handleExecuteShuffle(eventCode, authHeader, body));
+        }
+        if (action === "reset") {
+          return await toResult(await handleResetAssignments(eventCode, authHeader));
+        }
+      }
+    }
+
+    return json(404, { error: "API Endpoint Not Found" });
+  } catch (err: any) {
+    console.error("API Error:", err);
+    return json(500, { error: err.message || "Internal Server Error" });
+  }
 }

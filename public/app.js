@@ -49,51 +49,105 @@
   }
 
   // --- Real-time AppSync Events Connection ---
+  // AppSync Events の WebSocket は GraphQL 版と手順が違う:
+  //   1. サブプロトコルに header-<base64url(認証ヘッダ)> を載せる
+  //   2. connection_init を送って connection_ack を待つ
+  //   3. subscribe を送る
+  // connection_init を送らないとサーバ側でタイムアウトして切断される。
+  function base64UrlEncode(obj) {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    let bin = "";
+    bytes.forEach((b) => (bin += String.fromCharCode(b)));
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
   function setupAppSyncRealtime(eventCode, onUpdate) {
+    let retryDelay = 1000;
+    let closed = false;
+
     fetch(`${API}/config`)
       .then((res) => res.json())
       .then((config) => {
-        if (!config.appsyncEndpoint) return;
-
-        // Try AppSync WebSocket or Event Endpoint listener if configured
-        const httpEndpoint = config.appsyncEndpoint;
-        const apiKey = config.appsyncApiKey;
-        const host = httpEndpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
-        const wsUrl = `wss://${host}/event/realtime`;
-
-        try {
-          // AppSync Events WebSocket Connection Protocol
-          const headerObj = { host };
-          if (apiKey) headerObj["x-api-key"] = apiKey;
-
-          const encodedHeader = btoa(JSON.stringify(headerObj));
-          const fullWsUrl = `${wsUrl}?header=${encodedHeader}&payload=e30=`;
-
-          const ws = new WebSocket(fullWsUrl, ["aws-appsync-event-ws"]);
-          ws.onopen = () => {
-            console.log("Connected to AppSync Events Realtime");
-            // Subscribe to /event-bus/public/shuffle
-            ws.send(
-              JSON.stringify({
-                type: "subscribe",
-                id: "sub-1",
-                channel: "/event-bus/public/shuffle",
-                authorization: headerObj,
-              })
-            );
-          };
-
-          ws.onmessage = (event) => {
-            try {
-              const msg = JSON.parse(event.data);
-              if (msg.type === "data" || msg.event) {
-                onUpdate();
-              }
-            } catch (e) {}
-          };
-        } catch (err) {
-          console.warn("AppSync Realtime connection error:", err);
+        if (!config.appsyncRealtimeEndpoint || !config.appsyncApiKey) {
+          console.log("AppSync Events 未設定のためポーリングのみで動作します");
+          return;
         }
+
+        const httpHost = String(config.appsyncHttpEndpoint || "")
+          .replace(/^https?:\/\//, "")
+          .replace(/\/+$/, "");
+        const realtimeUrl =
+          String(config.appsyncRealtimeEndpoint).replace(/\/+$/, "") + "/event/realtime";
+        const channel = config.appsyncChannel || "/team-drawer/shuffle";
+        const auth = { host: httpHost, "x-api-key": config.appsyncApiKey };
+
+        function connect() {
+          if (closed) return;
+
+          let ws;
+          try {
+            ws = new WebSocket(realtimeUrl, [
+              "aws-appsync-event-ws",
+              `header-${base64UrlEncode(auth)}`,
+            ]);
+          } catch (err) {
+            console.warn("AppSync WebSocket 生成に失敗:", err);
+            return;
+          }
+
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: "connection_init" }));
+          };
+
+          ws.onmessage = (raw) => {
+            let msg;
+            try {
+              msg = JSON.parse(raw.data);
+            } catch (e) {
+              return;
+            }
+
+            switch (msg.type) {
+              case "connection_ack":
+                retryDelay = 1000;
+                ws.send(
+                  JSON.stringify({
+                    type: "subscribe",
+                    id: "shuffle-sub",
+                    channel: channel,
+                    authorization: auth,
+                  })
+                );
+                break;
+              case "subscribe_success":
+                console.log("AppSync Events 購読開始:", channel);
+                break;
+              case "subscribe_error":
+              case "connection_error":
+                console.warn("AppSync Events エラー:", raw.data);
+                break;
+              case "data":
+                onUpdate();
+                break;
+              default:
+                break; // ka (keepalive) など
+            }
+          };
+
+          ws.onclose = () => {
+            if (closed) return;
+            // 指数バックオフで再接続（最大30秒）
+            setTimeout(connect, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, 30000);
+          };
+
+          ws.onerror = () => ws.close();
+        }
+
+        connect();
+        window.addEventListener("beforeunload", () => {
+          closed = true;
+        });
       })
       .catch(() => {});
   }
@@ -133,7 +187,7 @@
       if (!teamsList) return;
 
       if (teams.length === 0) {
-        teamsList.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">管理者がシャッフルを実行すると、ここにチーム分け結果とAI一言コメントが表示されます。</p>`;
+        teamsList.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">管理者がシャッフルを実行すると、ここにチーム分け結果と佐賀弁のひとことが表示されます。</p>`;
         return;
       }
 
@@ -141,7 +195,7 @@
         .map((t) => {
           const membersStr = (t.members || []).map((m) => `<span>${escapeHtml(m)}</span>`).join("");
           const commentStr = t.comment
-            ? `<div class="ai-comment-badge"><span class="icon">✨</span><div><strong>AI一言コメント:</strong> ${escapeHtml(t.comment)}</div></div>`
+            ? `<div class="ai-comment-badge"><span class="icon">✨</span><div><strong>ひとこと:</strong> ${escapeHtml(t.comment)}</div></div>`
             : "";
 
           return `
@@ -205,7 +259,7 @@
 
           <p id="adminError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
 
-          <button type="button" id="shuffleBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 シャッフル実行 (Bedrockコメント付与)</button>
+          <button type="button" id="shuffleBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 シャッフル実行</button>
         </div>
 
         <div class="card">
@@ -281,7 +335,7 @@
       const teamCount = parseInt(teamCountInput.value, 10) || 3;
 
       shuffleBtn.disabled = true;
-      shuffleBtn.textContent = "⏳ シャッフル & AIコメント生成中...";
+      shuffleBtn.textContent = "⏳ シャッフル中...";
 
       try {
         const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/admin/shuffle`, {
@@ -301,14 +355,14 @@
           throw new Error(data.error || "シャッフルに失敗しました");
         }
 
-        showToast("✨ チーム分け＆AIコメント生成が完了しました！");
+        showToast("✨ チーム分けが完了しました！");
         renderAdminTeams(data.teams || []);
       } catch (err) {
         adminError.textContent = err.message;
         adminError.style.display = "block";
       } finally {
         shuffleBtn.disabled = false;
-        shuffleBtn.textContent = "🎲 シャッフル実行 (Bedrockコメント付与)";
+        shuffleBtn.textContent = "🎲 シャッフル実行";
       }
     });
 

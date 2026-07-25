@@ -1,120 +1,98 @@
-import { PrismaClient } from "@prisma/client";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 
-export const prisma = new PrismaClient();
+const TABLE_NAME = process.env.TABLE_NAME || "team-drawer";
 
-let isInitialized = false;
+const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
 
-export async function ensureDbSchema() {
-  if (isInitialized) return;
-  try {
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "EventState" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "eventCode" TEXT NOT NULL UNIQUE,
-        "title" TEXT NOT NULL DEFAULT 'JAWS-UG佐賀 チーム割り当て',
-        "patternJson" TEXT NOT NULL DEFAULT '{"teams":[]}',
-        "teamsJson" TEXT NOT NULL DEFAULT '[]',
-        "commentsJson" TEXT NOT NULL DEFAULT '{}',
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "Participant" (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "eventCode" TEXT NOT NULL,
-        "displayName" TEXT NOT NULL,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE("eventCode", "displayName")
-      );
-    `);
-    isInitialized = true;
-  } catch (err) {
-    console.error("Failed to initialize SQLite schema:", err);
-  }
+export interface Team {
+  name: string;
+  size: number;
+  members: string[];
 }
 
-export async function getOrCreateEventState(eventCode: string) {
-  await ensureDbSchema();
-  const code = eventCode.trim().toUpperCase();
-  let state = await prisma.eventState.findUnique({
-    where: { eventCode: code },
-  });
+export interface EventState {
+  eventCode: string;
+  title: string;
+  pattern: { teams: { name: string; size: number }[] };
+  teams: Team[];
+  comments: Record<string, string>;
+  participants: string[];
+  updatedAt: string;
+}
 
-  if (!state) {
-    state = await prisma.eventState.create({
-      data: {
-        eventCode: code,
-        title: "JAWS-UG佐賀 チーム割り当て",
-        patternJson: JSON.stringify({
-          teams: [
-            { name: "がばい", size: 5 },
-            { name: "やーらしか", size: 5 },
-            { name: "そいぎ", size: 5 },
-          ],
-        }),
-        teamsJson: JSON.stringify([]),
-        commentsJson: JSON.stringify({}),
-      },
-    });
+const DEFAULT_TITLE = "JAWS-UG佐賀 チーム割り当て";
+
+function normalizeCode(eventCode: string): string {
+  return eventCode.trim().toUpperCase();
+}
+
+function emptyState(code: string): EventState {
+  return {
+    eventCode: code,
+    title: DEFAULT_TITLE,
+    pattern: { teams: [] },
+    teams: [],
+    comments: {},
+    participants: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * イベント状態を1アイテムとして読む。未作成なら空の状態を返す（書き込みはしない）。
+ * 単発イベント用なので、1イベント = 1アイテムで持つ。
+ */
+export async function getEventState(eventCode: string): Promise<EventState> {
+  const code = normalizeCode(eventCode);
+  const res = await doc.send(
+    new GetCommand({ TableName: TABLE_NAME, Key: { pk: `EVENT#${code}` } })
+  );
+
+  if (!res.Item) {
+    return emptyState(code);
   }
 
-  return state;
+  const item = res.Item as Partial<EventState>;
+  return {
+    eventCode: code,
+    title: item.title || DEFAULT_TITLE,
+    pattern: item.pattern || { teams: [] },
+    teams: item.teams || [],
+    comments: item.comments || {},
+    participants: item.participants || [],
+    updatedAt: item.updatedAt || new Date().toISOString(),
+  };
 }
 
 export async function saveEventState(
   eventCode: string,
-  data: {
-    title?: string;
-    patternJson?: string;
-    teamsJson?: string;
-    commentsJson?: string;
-  }
-) {
-  await ensureDbSchema();
-  const code = eventCode.trim().toUpperCase();
-  return prisma.eventState.upsert({
-    where: { eventCode: code },
-    update: data,
-    create: {
-      eventCode: code,
-      title: data.title || "JAWS-UG佐賀 チーム割り当て",
-      patternJson: data.patternJson || JSON.stringify({ teams: [] }),
-      teamsJson: data.teamsJson || JSON.stringify([]),
-      commentsJson: data.commentsJson || JSON.stringify({}),
-    },
-  });
+  patch: Partial<Omit<EventState, "eventCode" | "updatedAt">>
+): Promise<EventState> {
+  const code = normalizeCode(eventCode);
+  const current = await getEventState(code);
+  const next: EventState = {
+    ...current,
+    ...patch,
+    eventCode: code,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await doc.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: { pk: `EVENT#${code}`, ...next },
+    })
+  );
+
+  return next;
 }
 
-export async function addParticipant(eventCode: string, displayName: string) {
-  await ensureDbSchema();
-  const code = eventCode.trim().toUpperCase();
-  const existing = await prisma.participant.findFirst({
-    where: { eventCode: code, displayName },
-  });
-  if (existing) {
-    return existing;
-  }
-  return prisma.participant.create({
-    data: {
-      eventCode: code,
-      displayName,
-    },
-  });
-}
-
-export async function getParticipants(eventCode: string) {
-  await ensureDbSchema();
-  const code = eventCode.trim().toUpperCase();
-  return prisma.participant.findMany({
-    where: { eventCode: code },
-    orderBy: { id: "asc" },
-  });
-}
-
-export async function clearParticipants(eventCode: string) {
-  await ensureDbSchema();
-  const code = eventCode.trim().toUpperCase();
-  await prisma.participant.deleteMany({
-    where: { eventCode: code },
-  });
+export async function setParticipants(
+  eventCode: string,
+  participants: string[]
+): Promise<EventState> {
+  return saveEventState(eventCode, { participants });
 }

@@ -3,9 +3,38 @@ import { TeamDrawerStack } from "../lib/team-drawer-stack";
 
 const app = new cdk.App();
 
+// リージョンはここ 1 箇所で切り替える。
+// 既定は ap-northeast-3 (Osaka)。AppSync Events 未提供などで deploy に失敗したら
+//   APP_REGION=ap-northeast-1 npm run cdk:deploy
+// で東京に切り替える。
+const region =
+  process.env.APP_REGION || app.node.tryGetContext("region") || "ap-northeast-3";
+
+const adminEmail =
+  process.env.ADMIN_EMAIL ||
+  app.node.tryGetContext("adminEmail") ||
+  "admin@jaws-ug-saga.example.com";
+
+const adminPassword =
+  process.env.ADMIN_PASSWORD || app.node.tryGetContext("adminPassword");
+
+if (!adminPassword) {
+  throw new Error(
+    [
+      "管理者パスワードが未設定です。リポジトリに平文で置かないよう環境変数で渡してください:",
+      "",
+      "  ADMIN_PASSWORD='YourStrongPassw0rd' npm run cdk:deploy",
+      "",
+      "条件: 8文字以上 / 大文字・小文字・数字をそれぞれ1文字以上",
+    ].join("\n")
+  );
+}
+
 new TeamDrawerStack(app, "TeamDrawerStack", {
   env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID,
-    region: process.env.AWS_REGION || "us-east-1",
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region,
   },
+  adminEmail,
+  adminPassword,
 });
