@@ -1,6 +1,19 @@
 (function () {
   const API = "/api";
-  const DEFAULT_EVENT_CODE = "JAWS-SAGA";
+  // サーバ (/api/config) から取得できなかったときだけ使うフォールバック。
+  // 通常はデプロイ時の EVENT_CODE がそのまま使われる。
+  let DEFAULT_EVENT_CODE = "JAWS-SAGA";
+
+  // /api/config は起動時とリアルタイム購読の両方で使うので一度だけ取得する
+  let configPromise = null;
+  function getConfig() {
+    if (!configPromise) {
+      configPromise = fetch(`${API}/config`)
+        .then((res) => res.json())
+        .catch(() => ({}));
+    }
+    return configPromise;
+  }
 
   function escapeHtml(str) {
     if (!str) return "";
@@ -82,8 +95,7 @@
       }
     }
 
-    fetch(`${API}/config`)
-      .then((res) => res.json())
+    getConfig()
       .then((config) => {
         if (!config.appsyncRealtimeEndpoint || !config.appsyncApiKey) {
           console.log("AppSync Events 未設定のためポーリングのみで動作します");
@@ -699,6 +711,10 @@
 
   // Initial Route Handler
   async function init() {
+    // デプロイ時の EVENT_CODE を採用する。URL に /e/{code} があればそちらが優先。
+    const config = await getConfig();
+    if (config.eventCode) DEFAULT_EVENT_CODE = config.eventCode;
+
     const route = parseRoute(getPath());
     const eventCode = route.eventCode;
 

@@ -174,6 +174,28 @@ npm run cdk:deploy
 
 完了後、`ParticipantUrl` と `AdminUrl` が出力されます。
 
+### デプロイ時に指定できる環境変数
+
+| 変数 | 既定 | 説明 |
+|---|---|---|
+| `ADMIN_PASSWORD` | （必須） | 管理者パスワード。8文字以上・大小英字と数字を含む |
+| `ADMIN_EMAIL` | `admin@jaws-ug-saga.example.com` | 管理者のログインID（Cognito ユーザー名） |
+| `EVENT_CODE` | `JAWS-SAGA` | イベントコード。URL `/e/{code}` とデータの保存キー |
+| `APP_REGION` | `ap-northeast-3` | デプロイ先リージョン |
+
+```bash
+EVENT_CODE='JAWS-SAGA-2026' \
+ADMIN_PASSWORD='YourStrongPassw0rd' \
+npm run cdk:deploy
+```
+
+`EVENT_CODE` は自動で大文字化され、英数字とハイフン・32文字以内かを検証します。
+画面側はサーバから受け取るのでコードの修正は不要です。
+
+**イベントコードを変えると、DynamoDB 上では別キーになるためまっさらな状態から始まります。**
+旧コードのデータは残りますが読み書きとも 404 になるので、
+当日の朝にコードを変えて再デプロイすれば、テストデータの消し忘れを気にせずに済みます。
+
 リージョン既定は **ap-northeast-3 (Osaka)**。切り替えは `APP_REGION` のみ:
 
 ```bash

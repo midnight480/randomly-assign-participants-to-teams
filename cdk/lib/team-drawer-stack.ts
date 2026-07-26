@@ -11,7 +11,6 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as path from "path";
 
-const EVENT_CODE = "JAWS-SAGA";
 const CHANNEL_NAMESPACE = "team-drawer";
 const CHANNEL = `/${CHANNEL_NAMESPACE}/shuffle`;
 /** くじ引きで最初にチームを作るときのチーム数 */
@@ -22,13 +21,15 @@ export interface TeamDrawerStackProps extends StackProps {
   readonly adminEmail: string;
   /** 管理者パスワード。恒久パスワードとして設定される */
   readonly adminPassword: string;
+  /** イベントコード。URL(/e/{code})とデータの保存キーになる */
+  readonly eventCode: string;
 }
 
 export class TeamDrawerStack extends Stack {
   constructor(scope: Construct, id: string, props: TeamDrawerStackProps) {
     super(scope, id, props);
 
-    const { adminEmail, adminPassword } = props;
+    const { adminEmail, adminPassword, eventCode } = props;
 
     // ------------------------------------------------------------------
     // 1. DynamoDB — チーム分け結果の保存先
@@ -151,7 +152,7 @@ export class TeamDrawerStack extends Stack {
         APPSYNC_REALTIME_ENDPOINT: `wss://${eventApi.realtimeDns}`,
         APPSYNC_API_KEY: apiKey.attrApiKey,
         APPSYNC_CHANNEL: CHANNEL,
-        EVENT_CODE,
+        EVENT_CODE: eventCode,
         TEAM_COUNT: String(TEAM_COUNT),
       },
       bundling: {
@@ -203,11 +204,11 @@ export class TeamDrawerStack extends Stack {
     const baseUrl = api.apiEndpoint;
 
     new CfnOutput(this, "ParticipantUrl", {
-      value: `${baseUrl}/e/${EVENT_CODE}`,
+      value: `${baseUrl}/e/${eventCode}`,
       description: "参加者用 公開URL（認証不要）",
     });
     new CfnOutput(this, "AdminUrl", {
-      value: `${baseUrl}/e/${EVENT_CODE}/admin`,
+      value: `${baseUrl}/e/${eventCode}/admin`,
       description: "管理者用URL（Cognito ログイン必須）",
     });
     new CfnOutput(this, "AdminEmail", {

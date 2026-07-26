@@ -18,6 +18,21 @@ const adminEmail =
 const adminPassword =
   process.env.ADMIN_PASSWORD || app.node.tryGetContext("adminPassword");
 
+// イベントコード。URL（/e/{code}）とデータの保存キーになる。
+// 変えると別イベント扱いになり、まっさらな状態から始まる。
+const eventCode = String(
+  process.env.EVENT_CODE || app.node.tryGetContext("eventCode") || "JAWS-SAGA"
+)
+  .trim()
+  .toUpperCase();
+
+if (!/^[A-Z0-9-]{1,32}$/.test(eventCode)) {
+  throw new Error(
+    `EVENT_CODE が不正です: "${eventCode}"\n` +
+      "URL に入るため、英数字とハイフンのみ・32文字以内にしてください（例: JAWS-SAGA-2026）"
+  );
+}
+
 // パスワード未設定なら例外を投げるのではなく、スタックを作らずに終える。
 // `cdk bootstrap` もアプリを合成するため、ここで throw すると
 // ブートストラップまで巻き添えで失敗してしまう。
@@ -45,5 +60,6 @@ if (!adminPassword) {
     env: { region },
     adminEmail,
     adminPassword,
+    eventCode,
   });
 }

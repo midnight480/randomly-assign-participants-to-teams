@@ -38,6 +38,8 @@ export AWS_REGION=ap-northeast-1
 export AWS_ACCESS_KEY_ID=dummy
 export AWS_SECRET_ACCESS_KEY=dummy
 export STATIC_DIR="$PWD/public"
+# 本番と同じく EVENT_CODE で切り替えられる
+export EVENT_CODE="${EVENT_CODE:-JAWS-SAGA}"
 export PORT
 # USER_POOL_ID / USER_POOL_CLIENT_ID は未設定のまま。
 # 管理者操作は 401 になる（認証の fail closed をローカルでも崩さない）。

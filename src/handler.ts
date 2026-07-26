@@ -215,6 +215,9 @@ export async function handler(
 
     if (requestPath === "/api/config" && httpMethod === "GET") {
       return json(200, {
+        // フロントがイベントコードをハードコードしなくて済むよう返す。
+        // デプロイ時に EVENT_CODE を変えても画面側の修正が要らない。
+        eventCode: ALLOWED_EVENT_CODE,
         userPoolId: process.env.USER_POOL_ID || "",
         userPoolClientId: process.env.USER_POOL_CLIENT_ID || "",
         appsyncHttpEndpoint: process.env.APPSYNC_HTTP_ENDPOINT || "",
