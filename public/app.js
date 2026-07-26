@@ -416,7 +416,7 @@
         <div class="card">
           <form id="loginForm">
             <label for="adminEmail">メールアドレス / ユーザー名</label>
-            <input type="text" id="adminEmail" placeholder="admin@jaws-ug-saga.local" required style="width:100%; padding:10px; margin-bottom:12px; border-radius:6px; border:1px solid var(--c-border)" />
+            <input type="text" id="adminEmail" placeholder="admin@example.com" required style="width:100%; padding:10px; margin-bottom:12px; border-radius:6px; border:1px solid var(--c-border)" />
 
             <label for="adminPassword">パスワード</label>
             <input type="password" id="adminPassword" placeholder="••••••••" required style="width:100%; padding:10px; margin-bottom:16px; border-radius:6px; border:1px solid var(--c-border)" />

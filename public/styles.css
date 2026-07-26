@@ -653,3 +653,12 @@ button.secondary:hover:not(:disabled) {
   }
 }
 
+/* テーマ切替ボタンは position:fixed で右上に固定されているため、
+   狭い画面ではタイトルが下に潜り込んで文字が切れる。
+   ボタンぶんの余白を確保する。 */
+@media (max-width: 640px) {
+  h1 {
+    padding-right: 96px;
+  }
+}
+

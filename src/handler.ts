@@ -128,7 +128,7 @@ async function handleLogin(rawBody: string): Promise<APIGatewayProxyStructuredRe
   const clientId = process.env.USER_POOL_CLIENT_ID;
 
   if (!clientId) {
-    return json(500, { error: "Cognito User Pool Client not configured" });
+    return json(500, { error: "Cognito が未設定です（サーバ側の設定を確認してください）" });
   }
 
   try {
