@@ -34,3 +34,5 @@ yarn-error.log*
 .wrangler/
 
 .aider.*
+# Test build output
+dist-test/

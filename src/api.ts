@@ -1,7 +1,8 @@
 import { generateTeamComments } from "./comments";
 import { verifyAdminToken } from "./auth";
 import { publishShuffleEvent } from "./events";
-import { getEventState, saveEventState, setParticipants, Team } from "./db";
+import { getEventState, saveEventState, setParticipants } from "./db";
+import type { Team } from "./db";
 import { normalizeDisplayName, jsonResponse, errorResponse } from "./util";
 
 export const SAGA_WORDS = [
@@ -54,6 +55,50 @@ export function pickRandomSagaNames(n: number, fromWords: string[] = SAGA_WORDS)
     res.push(`チーム${i + 1}`);
   }
   return res;
+}
+
+/**
+ * 参加者をチームへ振り分ける（純粋関数）。
+ * 元の実装と同じく Fisher-Yates でシャッフルし、余りを先頭チームから 1 名ずつ配る。
+ * 認証・永続化・通知から切り離してあるのでそのままテストできる。
+ */
+export function buildTeams(
+  participants: string[],
+  teamCount: number,
+  teamNames: string[] = []
+): Team[] {
+  const count = Math.max(1, teamCount);
+
+  let names = teamNames;
+  if (names.length < count) {
+    names = pickRandomSagaNames(count);
+  }
+
+  const shuffledNames = [...participants];
+  for (let i = shuffledNames.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledNames[i], shuffledNames[j]] = [shuffledNames[j], shuffledNames[i]];
+  }
+
+  const baseSize = Math.floor(shuffledNames.length / count);
+  const remainder = shuffledNames.length % count;
+
+  const teams: Team[] = [];
+  let memberIdx = 0;
+
+  for (let i = 0; i < count; i++) {
+    const size = baseSize + (i < remainder ? 1 : 0);
+    const members = shuffledNames.slice(memberIdx, memberIdx + size);
+    memberIdx += size;
+
+    teams.push({
+      name: names[i] || `チーム${i + 1}`,
+      size,
+      members,
+    });
+  }
+
+  return teams;
 }
 
 export async function handleGetEvent(eventCode: string): Promise<Response> {
@@ -141,40 +186,9 @@ export async function handleExecuteShuffle(
     return errorResponse("シャッフル対象の参加者が登録されていません", 400);
   }
 
-  // 2. Determine team count and names
+  // 2. Determine team count and 3. shuffle
   const teamCount = Math.max(1, body.team_count || Math.min(4, participants.length));
-  let teamNames: string[] = body.team_names || [];
-
-  if (teamNames.length < teamCount) {
-    const pickedSaga = pickRandomSagaNames(teamCount);
-    teamNames = pickedSaga;
-  }
-
-  // 3. Shuffle participants algorithm (Random distribution)
-  const shuffledNames = [...participants];
-  for (let i = shuffledNames.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledNames[i], shuffledNames[j]] = [shuffledNames[j], shuffledNames[i]];
-  }
-
-  // Calculate capacities
-  const baseSize = Math.floor(shuffledNames.length / teamCount);
-  const remainder = shuffledNames.length % teamCount;
-
-  const teams: Team[] = [];
-  let memberIdx = 0;
-
-  for (let i = 0; i < teamCount; i++) {
-    const size = baseSize + (i < remainder ? 1 : 0);
-    const members = shuffledNames.slice(memberIdx, memberIdx + size);
-    memberIdx += size;
-
-    teams.push({
-      name: teamNames[i] || `チーム${i + 1}`,
-      size,
-      members,
-    });
-  }
+  const teams = buildTeams(participants, teamCount, body.team_names || []);
 
   // 4. Attach a Saga-dialect comment per team
   const comments = generateTeamComments(teams);

@@ -22,10 +22,12 @@ const cognitoClient = new CognitoIdentityProviderClient({});
  * commandHooks で public/ を同じ階層にコピーする。
  * ローカル実行 (dist/handler.js) では一つ上に public/ がある。
  */
-const STATIC_DIR = [
-  path.join(__dirname, "public"),
-  path.join(__dirname, "..", "public"),
-].find((p) => fs.existsSync(p)) ?? path.join(__dirname, "public");
+const STATIC_DIR =
+  process.env.STATIC_DIR ||
+  [path.join(__dirname, "public"), path.join(__dirname, "..", "public")].find((p) =>
+    fs.existsSync(p)
+  ) ||
+  path.join(__dirname, "public");
 
 const TEXT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",

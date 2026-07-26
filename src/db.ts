@@ -3,9 +3,13 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dyn
 
 const TABLE_NAME = process.env.TABLE_NAME || "team-drawer";
 
-const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
-  marshallOptions: { removeUndefinedValues: true },
-});
+// DYNAMODB_ENDPOINT はローカルテスト (DynamoDB Local) 用。Lambda 上では未設定。
+const doc = DynamoDBDocumentClient.from(
+  new DynamoDBClient(
+    process.env.DYNAMODB_ENDPOINT ? { endpoint: process.env.DYNAMODB_ENDPOINT } : {}
+  ),
+  { marshallOptions: { removeUndefinedValues: true } }
+);
 
 export interface Team {
   name: string;
