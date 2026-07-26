@@ -65,6 +65,23 @@
     let retryDelay = 1000;
     let closed = false;
 
+    // 通知の受信を 1 秒に 1 回までに制限する（末尾の通知は取りこぼさない）
+    let lastRun = 0;
+    let pendingTimer = null;
+    function throttledUpdate() {
+      const wait = Math.max(0, 1000 - (Date.now() - lastRun));
+      if (wait === 0) {
+        lastRun = Date.now();
+        onUpdate();
+      } else if (!pendingTimer) {
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null;
+          lastRun = Date.now();
+          onUpdate();
+        }, wait);
+      }
+    }
+
     fetch(`${API}/config`)
       .then((res) => res.json())
       .then((config) => {
@@ -127,7 +144,10 @@
                 console.warn("AppSync Events エラー:", raw.data);
                 break;
               case "data":
-                onUpdate();
+                // AppSync の API キーは /api/config で公開されるため、第三者も
+                // publish できる。通知を受けるたび無条件に再取得すると連打で
+                // バックエンドを叩かされるので、1秒に1回までに絞る。
+                throttledUpdate();
                 break;
               default:
                 break; // ka (keepalive) など

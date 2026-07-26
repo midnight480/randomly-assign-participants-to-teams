@@ -5,6 +5,9 @@ import { getEventState, saveEventState, setParticipants } from "./db";
 import type { Team } from "./db";
 import { normalizeDisplayName, jsonResponse, errorResponse } from "./util";
 
+/** 1イベントあたりの参加者数上限（DynamoDB のアイテムサイズ上限に対する保険） */
+export const MAX_PARTICIPANTS = 500;
+
 export const SAGA_WORDS = [
   "がばい",
   "やーらしか",
@@ -146,6 +149,16 @@ export async function handlePostParticipants(
     }
   }
 
+  // 参加者登録は認証不要なので、大量登録で DynamoDB のアイテムサイズ上限(400KB)に
+  // 当たってイベントごと壊れないよう上限を設ける。中途半端に保存されると
+  // 状況が分かりにくいため、超える場合はまとめて拒否する。
+  if (state.participants.length + added.length > MAX_PARTICIPANTS) {
+    return errorResponse(
+      `参加者数が上限(${MAX_PARTICIPANTS}名)を超えるため登録できません`,
+      400
+    );
+  }
+
   if (added.length > 0) {
     await setParticipants(eventCode, [...state.participants, ...added]);
   }
@@ -184,6 +197,12 @@ export async function handleExecuteShuffle(
 
   if (participants.length === 0) {
     return errorResponse("シャッフル対象の参加者が登録されていません", 400);
+  }
+  if (participants.length > MAX_PARTICIPANTS) {
+    return errorResponse(
+      `参加者は${MAX_PARTICIPANTS}名までです（${participants.length}名が指定されました）`,
+      400
+    );
   }
 
   // 2. Determine team count and 3. shuffle

@@ -136,6 +136,34 @@ test("同じ参加者名は重複登録されない", async () => {
   assert.deepEqual(parse(get.body).participants, ["山田", "佐藤"]);
 });
 
+test("参加者数の上限を超える登録は全件拒否される", async () => {
+  const many = Array.from({ length: 600 }, (_, i) => `参加者${i}`);
+  const res = await handler(
+    req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: many } })
+  );
+  assert.equal(res.statusCode, 400);
+  assert.match(parse(res.body).error, /上限/);
+
+  // 中途半端に保存されていないこと
+  const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
+  assert.equal(parse(get.body).participant_count, 0);
+});
+
+test("上限ちょうどまでは登録できる", async () => {
+  const exact = Array.from({ length: 500 }, (_, i) => `参加者${i}`);
+  const ok = await handler(
+    req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: exact } })
+  );
+  assert.equal(ok.statusCode, 200);
+  assert.equal(parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body).participant_count, 500);
+
+  // その先の1名は拒否される
+  const over = await handler(
+    req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: ["あと一人"] } })
+  );
+  assert.equal(over.statusCode, 400);
+});
+
 test("参加者名が空なら 400", async () => {
   const res = await handler(
     req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: [] } })
