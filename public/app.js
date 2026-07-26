@@ -511,15 +511,32 @@
     const adminError = document.getElementById("adminError");
     const adminTeamsList = document.getElementById("adminTeamsList");
 
+    // 「全員を引き直す」はテキストエリアの内容でサーバ側の参加者を置き換える。
+    // 開いた時点のリストを持ち続けると、その後にくじを引いた人が引き直しで消える。
+    // そのため定期的にサーバの値へ追従させる。ただし管理者が手で編集した場合と
+    // 入力中（フォーカス中）は上書きしない。
+    let lastServerList = "";
+    let teamCountInitialized = false;
+
     function loadCurrentState() {
       fetchEvent(eventCode)
         .then((data) => {
-          if (data.participants && data.participants.length > 0 && !participantInput.value) {
-            participantInput.value = data.participants.join("\n");
+          const serverList = (data.participants || []).join("\n");
+          const edited =
+            participantInput.value.trim() !== "" &&
+            participantInput.value !== lastServerList;
+
+          if (!edited && document.activeElement !== participantInput) {
+            participantInput.value = serverList;
           }
-          if (data.teams && data.teams.length > 0) {
+          lastServerList = serverList;
+
+          // チーム数はポーリングのたびに上書きすると入力中の値が戻ってしまう
+          if (!teamCountInitialized && data.teams && data.teams.length > 0) {
             teamCountInput.value = data.teams.length;
+            teamCountInitialized = true;
           }
+
           renderAdminTeams(data.teams || []);
         })
         .catch(() => {});
@@ -544,6 +561,8 @@
     }
 
     loadCurrentState();
+    // 開場中は参加者が増え続けるので、管理画面も自動で追従させる
+    setInterval(loadCurrentState, 3000);
 
     shuffleBtn.addEventListener("click", async () => {
       adminError.style.display = "none";
