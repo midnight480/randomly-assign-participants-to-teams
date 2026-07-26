@@ -239,9 +239,9 @@ DynamoDB Local を Docker で起動し、サンプルのチーム分け結果を
 | **実 AWS へのデプロイ** | ✅ ap-northeast-3 (Osaka) で稼働確認 |
 | ローカル開発サーバでの通し確認 | ✅ `./scripts/dev.sh` |
 | **ブラウザでの動作確認** | ✅ ローカル開発サーバで実施（参加者画面・管理ログイン・モバイル幅） |
-| **AppSync Events の大阪での利用可否** | ✅ エンドポイント生成を確認 |
+| **AppSync Events の大阪での利用可否** | ✅ 実接続・実配信まで確認 |
 | **スマホからのQR→くじ引き** | ✅ 大阪の実機で確認 |
-| **AppSync Events の WebSocket 実接続** | ⚠️ 未確認（3秒ポーリングで代替動作） |
+| **AppSync Events の WebSocket 実接続** | ✅ HAR で 101 + subscribe_success + data 配信を確認 |
 
 ## フェーズ6: 実機デプロイで判明した問題と参加フローの追加
 
@@ -402,11 +402,26 @@ main との違いは枠の扱い。main は事前に決めた枠（例: 4チー�
 
 ### AppSync WebSocket について
 
-HAR に WebSocket のエントリは無かったが、これは**管理画面の HAR だから**。
+最初の HAR2本に WebSocket のエントリが無かったのは**管理画面の HAR だったため**。
 `setupAppSyncRealtime()` は参加者画面と会場表示モードでしか呼ばれない。
-（加えて Chrome の HAR エクスポートは WebSocket フレームを含まない）
-確認するなら参加者画面のコンソールで
-`AppSync Events 購読開始: /team-drawer/shuffle` が出るかを見る。
+
+参加者画面・会場表示モードの HAR を取り直したところ、**接続と配信が確認できた**。
+
+```
+wss://<...>.appsync-realtime-api.ap-northeast-3.amazonaws.com/event/realtime
+  → 101 Switching Protocols (subprotocol: aws-appsync-event-ws)
+
+送信→ connection_init
+←受信 connection_ack (connectionTimeoutMs=300000)
+送信→ subscribe channel=/team-drawer/shuffle
+←受信 ka
+←受信 subscribe_success
+←受信 data  teams=['そげん','ぬくか','よかろうもん','ちかっぱ','うまかね']
+```
+
+最後の `data` フレームが、誰かがくじを引いた瞬間にチーム構成がプッシュされて
+いることの裏付け。これで AppSync Events は大阪リージョンで完全に動作している
+ことが確認できた。
 
 ## AGY レビューへの対応
 
