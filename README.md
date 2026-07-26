@@ -34,6 +34,125 @@ JAWS-UG佐賀 ワークショップ向けに、**管理者がシャッフルを�
 | リアルタイム更新 | AppSync Events（チャンネル `/team-drawer/shuffle`） |
 | IaC | AWS CDK |
 
+### 構成図
+
+```mermaid
+flowchart TB
+    subgraph client["ブラウザ"]
+        V["参加者のスマホ<br/>会場ディスプレイ<br/>/e/JAWS-SAGA[/display]"]
+        A["管理者<br/>/e/JAWS-SAGA/admin"]
+    end
+
+    subgraph aws["AWS ap-northeast-3 Osaka"]
+        APIGW["API Gateway HTTP API<br/>$default ステージ / throttle 500rps"]
+        L["Lambda Node.js 22<br/>API + 静的ファイル配信"]
+        DDB[("DynamoDB<br/>1イベント = 1アイテム<br/>version で楽観ロック")]
+        COG["Cognito User Pool<br/>管理者認証"]
+        EV["AppSync Events<br/>/team-drawer/shuffle"]
+    end
+
+    V -->|HTTPS| APIGW
+    A -->|HTTPS| APIGW
+    APIGW --> L
+    L <-->|読み書き| DDB
+    L -->|InitiateAuth| COG
+    L -->|publish| EV
+    EV -.->|WebSocket push| V
+
+    classDef browser fill:#eef2ff,stroke:#7788cc
+    class V,A browser
+```
+
+**ポイント**
+
+- 静的ファイル（HTML/CSS/JS）も Lambda が配信するため、CloudFront や S3 は使いません。単発イベント用の割り切りです
+- API Gateway は **HTTP API の `$default` ステージ**。REST API だと URL が `/prod/...` になり、フロントの絶対パスが届かなくなります
+- リアルタイム更新は AppSync Events の **WebSocket プッシュ**。通知はトリガーにするだけで、**画面に出すデータは必ず API から取り直します**（第三者が publish しても偽データが出ない）
+- 3秒ポーリングを併用しているため、WebSocket が繋がらなくても結果は反映されます
+
+### シーケンス図: 参加者がくじを引く
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor P as 参加者A
+    participant B as ブラウザ
+    participant L as Lambda
+    participant DB as DynamoDB
+    participant EV as AppSync Events
+    actor P2 as 他の参加者/会場ディスプレイ
+
+    P->>B: QRを読み取る
+    B->>L: GET /e/JAWS-SAGA
+    L-->>B: index.html / app.js / styles.css
+    B->>L: GET /api/config
+    L-->>B: AppSync エンドポイント + APIキー
+
+    Note over B,EV: リアルタイム購読の確立
+    B->>EV: WebSocket 接続 (subprotocol: aws-appsync-event-ws)
+    B->>EV: connection_init
+    EV-->>B: connection_ack
+    B->>EV: subscribe /team-drawer/shuffle
+    EV-->>B: subscribe_success
+
+    P->>B: 名前を入れて「くじを引く」
+    B->>L: POST /api/events/JAWS-SAGA/draw
+    L->>DB: 現在の状態を読む
+    DB-->>L: teams / participants / version
+    Note over L: 一番人数が少ないチームを選ぶ<br/>同数ならその中から抽選
+    L->>DB: version 条件付きで書き込み
+    alt 他の人と競合した
+        DB-->>L: ConditionalCheckFailed
+        Note over L,DB: 読み直して再試行（最大8回）
+    else 成功
+        DB-->>L: OK
+    end
+    L->>EV: publish（チーム構成）
+    L-->>B: {team_name, comment}
+    B->>P: 「◯◯チームに決まりました！」
+
+    EV-->>P2: data フレームをプッシュ
+    P2->>L: GET /api/events/JAWS-SAGA
+    L-->>P2: 最新のチーム構成
+    Note over P2: 画面を更新（偽データ防止のため必ず取り直す）
+```
+
+### シーケンス図: 管理者のログインと引き直し
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor A as 管理者
+    participant B as ブラウザ
+    participant L as Lambda
+    participant COG as Cognito
+    participant DB as DynamoDB
+    participant EV as AppSync Events
+
+    A->>B: /e/JAWS-SAGA/admin を開く
+    B->>L: POST /api/auth/login
+    L->>COG: InitiateAuth (USER_PASSWORD_AUTH)
+    COG-->>L: IdToken
+    L-->>B: {token}
+    Note over B: localStorage に保存
+
+    loop 3秒ごと
+        B->>L: GET /api/events/JAWS-SAGA
+        L-->>B: 参加者一覧・チーム構成
+        Note over B: 参加者リストを画面に追従させる<br/>（手で編集中は上書きしない）
+    end
+
+    A->>B: チーム数を指定して「全員を引き直す」
+    B->>L: POST /api/events/JAWS-SAGA/admin/shuffle<br/>Authorization: Bearer IdToken
+    L->>COG: JWT 検証（aws-jwt-verify）
+    COG-->>L: 検証OK
+    Note over L: 検証に失敗したら必ず401<br/>（fail closed）
+    L->>DB: 新しいチーム構成を保存
+    L->>EV: publish
+    L-->>B: 結果
+    EV-->>B: 全参加者の画面へプッシュ
+```
+
 ## セットアップ
 
 ```bash
