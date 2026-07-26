@@ -21,7 +21,7 @@ JAWS-UG佐賀 ワークショップ用。管理者がシャッフルを実行し
 
 ```bash
 npm install
-npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3
+npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3   # 初回のみ
 ```
 
 ## デプロイ
@@ -42,6 +42,11 @@ npm run cdk:deploy
 > このイベント専用の捨てパスワードにしておけば実害はない。
 
 デプロイ完了後、`ParticipantUrl` と `AdminUrl` が出力される。
+
+> `cdk bootstrap` もアプリを合成するため、当初は `app.ts` の
+> パスワード必須チェックがブートストラップまで巻き添えで失敗させていた。
+> 現在は「パスワード未設定ならスタックを生成せず、案内を出して終了」する
+> 実装にしてあるので、ブートストラップに `ADMIN_PASSWORD` は不要。
 
 ## リージョンの切り替え
 

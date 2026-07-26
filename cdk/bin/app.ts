@@ -18,23 +18,31 @@ const adminEmail =
 const adminPassword =
   process.env.ADMIN_PASSWORD || app.node.tryGetContext("adminPassword");
 
+// パスワード未設定なら例外を投げるのではなく、スタックを作らずに終える。
+// `cdk bootstrap` もアプリを合成するため、ここで throw すると
+// ブートストラップまで巻き添えで失敗してしまう。
+// スタックが存在しなければ deploy は進めないので、安全性は保たれる。
 if (!adminPassword) {
-  throw new Error(
+  console.error(
     [
-      "管理者パスワードが未設定です。リポジトリに平文で置かないよう環境変数で渡してください:",
+      "",
+      "管理者パスワードが未設定のため、スタックを生成しませんでした。",
+      "リポジトリに平文で置かないよう環境変数で渡してください:",
       "",
       "  ADMIN_PASSWORD='YourStrongPassw0rd' npm run cdk:deploy",
       "",
       "条件: 8文字以上 / 大文字・小文字・数字をそれぞれ1文字以上",
+      "使い回しではなく、このイベント専用の使い捨てパスワードにしてください。",
+      "",
     ].join("\n")
   );
+} else {
+  new TeamDrawerStack(app, "TeamDrawerStack", {
+    env: {
+      account: process.env.CDK_DEFAULT_ACCOUNT,
+      region,
+    },
+    adminEmail,
+    adminPassword,
+  });
 }
-
-new TeamDrawerStack(app, "TeamDrawerStack", {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region,
-  },
-  adminEmail,
-  adminPassword,
-});

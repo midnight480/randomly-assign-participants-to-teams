@@ -32,7 +32,7 @@ JAWS-UG佐賀 ワークショップ向けに、**管理者がシャッフルを�
 
 ```bash
 npm install
-npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3
+npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3   # 初回のみ
 ```
 
 ## デプロイ
