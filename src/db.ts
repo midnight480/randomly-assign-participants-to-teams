@@ -1,4 +1,4 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { ConditionalCheckFailedException, DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 
 const TABLE_NAME = process.env.TABLE_NAME || "team-drawer";
@@ -25,6 +25,8 @@ export interface EventState {
   comments: Record<string, string>;
   participants: string[];
   updatedAt: string;
+  /** 楽観ロック用。参加者が同時にくじを引いても更新が消えないようにする */
+  version: number;
 }
 
 const DEFAULT_TITLE = "JAWS-UG佐賀 チーム割り当て";
@@ -42,6 +44,7 @@ function emptyState(code: string): EventState {
     comments: {},
     participants: [],
     updatedAt: new Date().toISOString(),
+    version: 0,
   };
 }
 
@@ -68,30 +71,65 @@ export async function getEventState(eventCode: string): Promise<EventState> {
     comments: item.comments || {},
     participants: item.participants || [],
     updatedAt: item.updatedAt || new Date().toISOString(),
+    version: item.version || 0,
   };
+}
+
+/**
+ * 読み出し → 変更 → 条件付き書き込み。
+ * 参加者が一斉にくじを引くと単純な上書きでは更新が失われるため、
+ * version を条件にして衝突したら読み直して再試行する。
+ */
+export async function updateEventState(
+  eventCode: string,
+  mutate: (state: EventState) => Partial<Omit<EventState, "eventCode" | "updatedAt" | "version">> | null,
+  maxRetries = 8
+): Promise<EventState> {
+  const code = normalizeCode(eventCode);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const current = await getEventState(code);
+    const patch = mutate(current);
+    if (patch === null) return current; // 変更不要
+
+    const next: EventState = {
+      ...current,
+      ...patch,
+      eventCode: code,
+      updatedAt: new Date().toISOString(),
+      version: current.version + 1,
+    };
+
+    try {
+      await doc.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: { pk: `EVENT#${code}`, ...next },
+          // 誰も書き換えていないときだけ成功させる
+          ConditionExpression:
+            "attribute_not_exists(pk) OR version = :expected",
+          ExpressionAttributeValues: { ":expected": current.version },
+        })
+      );
+      return next;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        // 競合。少し待って読み直す
+        await new Promise((r) => setTimeout(r, 20 + Math.random() * 60));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("同時アクセスが多いため保存できませんでした。もう一度お試しください");
 }
 
 export async function saveEventState(
   eventCode: string,
-  patch: Partial<Omit<EventState, "eventCode" | "updatedAt">>
+  patch: Partial<Omit<EventState, "eventCode" | "updatedAt" | "version">>
 ): Promise<EventState> {
-  const code = normalizeCode(eventCode);
-  const current = await getEventState(code);
-  const next: EventState = {
-    ...current,
-    ...patch,
-    eventCode: code,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await doc.send(
-    new PutCommand({
-      TableName: TABLE_NAME,
-      Item: { pk: `EVENT#${code}`, ...next },
-    })
-  );
-
-  return next;
+  return updateEventState(eventCode, () => patch);
 }
 
 export async function setParticipants(

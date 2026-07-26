@@ -1,8 +1,8 @@
 import { generateTeamComments } from "./comments";
 import { verifyAdminToken } from "./auth";
 import { publishShuffleEvent } from "./events";
-import { getEventState, saveEventState, setParticipants } from "./db";
-import type { Team } from "./db";
+import { getEventState, saveEventState, setParticipants, updateEventState } from "./db";
+import type { EventState, Team } from "./db";
 import { normalizeDisplayName, jsonResponse, errorResponse } from "./util";
 
 /** 1イベントあたりの参加者数上限（DynamoDB のアイテムサイズ上限に対する保険） */
@@ -102,6 +102,102 @@ export function buildTeams(
   }
 
   return teams;
+}
+
+/** くじ引きで最初にチームを作るときの既定チーム数 */
+export const DEFAULT_TEAM_COUNT = Number(process.env.TEAM_COUNT) || 4;
+
+/**
+ * 参加者が自分でくじを引く。管理者の操作は不要。
+ *
+ * main ブランチは事前に決めた「枠」を埋めていく方式だったが、
+ * 枠が尽きると参加できなくなるため、ここでは上限を設けず
+ * 「いま一番人数が少ないチーム」に入れる（同数なら抽選）。
+ * これで事前の人数見積もりが不要になり、遅刻者もそのまま参加できる。
+ */
+export async function handleDrawTeam(
+  eventCode: string,
+  body: { display_name?: string }
+): Promise<Response> {
+  const displayName = normalizeDisplayName(body?.display_name || "");
+  if (!displayName) {
+    return errorResponse("表示名を入力してください", 400);
+  }
+
+  // すでに引いていれば同じ結果を返す（連打・再読み込みで二重登録しない）
+  const before = await getEventState(eventCode);
+  const existing = findTeamOf(before, displayName);
+  if (existing) {
+    return jsonResponse({
+      display_name: displayName,
+      team_name: existing.name,
+      comment: before.comments[existing.name] || "",
+      already_assigned: true,
+    });
+  }
+
+  if (before.participants.length >= MAX_PARTICIPANTS) {
+    return errorResponse(`参加者数の上限(${MAX_PARTICIPANTS}名)に達しています`, 400);
+  }
+
+  let assignedTeam = "";
+
+  const saved = await updateEventState(eventCode, (state) => {
+    // 再試行中に他の人の書き込みで自分が入っていたらそれを採用する
+    const already = findTeamOf(state, displayName);
+    if (already) {
+      assignedTeam = already.name;
+      return null;
+    }
+
+    let teams = state.teams;
+    let comments = state.comments;
+
+    // 最初の1人でチームを作る
+    if (teams.length === 0) {
+      const names = pickRandomSagaNames(DEFAULT_TEAM_COUNT);
+      teams = names.map((name) => ({ name, size: 0, members: [] }));
+      comments = generateTeamComments(teams);
+    }
+
+    // 一番少ないチーム（同数なら抽選）
+    const min = Math.min(...teams.map((t) => t.members.length));
+    const candidates = teams.filter((t) => t.members.length === min);
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
+    assignedTeam = target.name;
+
+    const nextTeams = teams.map((t) =>
+      t.name === target.name
+        ? { ...t, members: [...t.members, displayName], size: t.members.length + 1 }
+        : t
+    );
+
+    return {
+      teams: nextTeams,
+      comments,
+      participants: [...state.participants, displayName],
+      pattern: { teams: nextTeams.map((t) => ({ name: t.name, size: t.size })) },
+    };
+  });
+
+  await publishShuffleEvent(eventCode, {
+    event_code: saved.eventCode,
+    teams: saved.teams.map((t) => ({ ...t, comment: saved.comments[t.name] || "" })),
+    comments: saved.comments,
+    assigned_count: saved.participants.length,
+    updated_at: saved.updatedAt,
+  });
+
+  return jsonResponse({
+    display_name: displayName,
+    team_name: assignedTeam,
+    comment: saved.comments[assignedTeam] || "",
+    already_assigned: false,
+  });
+}
+
+function findTeamOf(state: EventState, displayName: string): Team | null {
+  return state.teams.find((t) => (t.members || []).indexOf(displayName) !== -1) || null;
 }
 
 export async function handleGetEvent(eventCode: string): Promise<Response> {

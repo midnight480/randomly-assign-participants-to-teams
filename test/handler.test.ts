@@ -278,3 +278,80 @@ test("同じ人が二度登録しても重複しない（連打・再読み込�
   const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
   assert.equal(parse(get.body).participant_count, 1);
 });
+
+// --- くじ引き（参加者セルフ抽選） ----------------------------------------
+
+test("くじを引くとその場でチームが決まる（管理者操作不要）", async () => {
+  const res = await handler(
+    req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "しばお" } })
+  );
+  assert.equal(res.statusCode, 200);
+  const d = parse(res.body);
+  assert.equal(d.display_name, "しばお");
+  assert.ok(d.team_name, "チーム名が返っていない");
+  assert.equal(d.already_assigned, false);
+
+  const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
+  const body = parse(get.body);
+  const team = body.teams.find((t: any) => t.members.includes("しばお"));
+  assert.ok(team, "チームに入っていない");
+  assert.equal(team.name, d.team_name);
+});
+
+test("同じ人が二度引いても同じチームが返る（連打・再読み込み対策）", async () => {
+  const first = parse(
+    (await handler(req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "しばお" } }))).body
+  );
+  const second = parse(
+    (await handler(req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "しばお" } }))).body
+  );
+  assert.equal(second.team_name, first.team_name);
+  assert.equal(second.already_assigned, true);
+
+  const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
+  assert.equal(parse(get.body).participant_count, 1);
+});
+
+test("表示名が空ならくじを引けない", async () => {
+  for (const name of ["", "   "]) {
+    const res = await handler(
+      req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: name } })
+    );
+    assert.equal(res.statusCode, 400);
+  }
+});
+
+test("人数が増えてもチームは均等に保たれる（枠切れで参加できなくならない）", async () => {
+  for (let i = 0; i < 23; i++) {
+    const res = await handler(
+      req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: `参加者${i}` } })
+    );
+    assert.equal(res.statusCode, 200, `${i}人目で失敗`);
+  }
+
+  const body = parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body);
+  const sizes = body.teams.map((t: any) => t.members.length);
+  assert.equal(body.participant_count, 23);
+  assert.equal(sizes.reduce((a: number, b: number) => a + b, 0), 23);
+  assert.ok(
+    Math.max(...sizes) - Math.min(...sizes) <= 1,
+    `人数が偏っている: ${JSON.stringify(sizes)}`
+  );
+});
+
+test("同時に引いても誰も取りこぼされない（楽観ロック）", async () => {
+  const names = Array.from({ length: 20 }, (_, i) => `同時${i}`);
+  const results = await Promise.all(
+    names.map((n) =>
+      handler(req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: n } }))
+    )
+  );
+  for (const r of results) assert.equal(r.statusCode, 200);
+
+  const body = parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body);
+  assert.equal(body.participant_count, 20, "参加者が取りこぼされた");
+
+  const assigned = body.teams.flatMap((t: any) => t.members);
+  assert.equal(assigned.length, 20, "チームへの割り当てが取りこぼされた");
+  assert.deepEqual([...assigned].sort(), [...names].sort());
+});

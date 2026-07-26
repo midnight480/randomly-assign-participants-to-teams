@@ -5,6 +5,7 @@ import type {
 import {
   handleGetEvent,
   handlePostParticipants,
+  handleDrawTeam,
   handleExecuteShuffle,
   handleResetAssignments,
 } from "./api";
@@ -244,6 +245,13 @@ export async function handler(
       if (segments.length === 3 && segments[2] === "participants" && httpMethod === "POST") {
         return await toResult(
           await handlePostParticipants(eventCode, JSON.parse(rawBody || "{}"))
+        );
+      }
+
+      // 参加者が自分でくじを引く（管理者の操作は不要）
+      if (segments.length === 3 && segments[2] === "draw" && httpMethod === "POST") {
+        return await toResult(
+          await handleDrawTeam(eventCode, JSON.parse(rawBody || "{}"))
         );
       }
 

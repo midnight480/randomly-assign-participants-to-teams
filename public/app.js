@@ -227,15 +227,29 @@
 
       const name = myName();
       const joined = !!name && (event.participants || []).indexOf(name) !== -1;
-      const nextState = joined ? `joined:${name}` : "form";
+      const currentTeam = joined
+        ? ((event.teams || []).find((t) => (t.members || []).indexOf(name) !== -1) || {}).name || ""
+        : "";
+      const nextState = joined ? `joined:${name}:${currentTeam}` : "form";
       if (nextState === joinCardState) return;
       joinCardState = nextState;
 
       if (joined) {
+        const myTeam = (event.teams || []).find(
+          (t) => (t.members || []).indexOf(name) !== -1
+        );
+        const teamBlock = myTeam
+          ? `<div class="result-card" style="margin:12px 0">
+               <p class="label" style="margin:0 0 4px">${escapeHtml(name)} さんは</p>
+               <p style="margin:0; font-size:1.6rem; font-weight:800; color:var(--c-primary)">${escapeHtml(myTeam.name)} チーム</p>
+               ${myTeam.comment ? `<p style="margin:8px 0 0; font-size:0.95rem">✨ ${escapeHtml(myTeam.comment)}</p>` : ""}
+             </div>`
+          : `<p style="margin:0 0 8px">✅ <strong>${escapeHtml(name)}</strong> さんで参加済みです。</p>`;
+
         card.innerHTML = `
-          <p style="margin:0 0 8px">✅ <strong>${escapeHtml(name)}</strong> さんで参加登録済みです。</p>
+          ${teamBlock}
           <p style="margin:0; color:var(--c-text-muted); font-size:0.9rem">
-            管理者がシャッフルを実行すると、下に結果が出ます。この画面は開いたままにしてください。
+            この画面は開いたままにしてください。チーム構成が変わると自動で更新されます。
           </p>
           <button type="button" id="changeNameBtn" class="secondary" style="margin-top:12px; padding:6px 12px; font-size:0.85rem">名前を変更する</button>
         `;
@@ -251,12 +265,12 @@
       }
 
       card.innerHTML = `
-        <h2 style="font-size:1.1rem; margin:0 0 12px">まず名前を登録してください</h2>
+        <h2 style="font-size:1.1rem; margin:0 0 12px">名前を入れて、くじを引いてください</h2>
         <label for="joinName">表示名（氏名・ニックネーム）</label>
         <input type="text" id="joinName" maxlength="30" placeholder="例）しばお / 佐賀太郎"
                style="width:100%; padding:10px; margin-bottom:12px; border-radius:6px; border:1px solid var(--c-border)" />
         <p id="joinError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
-        <button type="button" id="joinBtn" style="width:100%; font-weight:bold; padding:12px;">参加する</button>
+        <button type="button" id="joinBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 くじを引く</button>
       `;
 
       const input = document.getElementById("joinName");
@@ -273,25 +287,29 @@
         }
         err.style.display = "none";
         btn.disabled = true;
-        btn.textContent = "登録中...";
+        btn.textContent = "🎲 抽選中...";
         try {
-          const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/participants`, {
+          const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/draw`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ names: [value] }),
+            body: JSON.stringify({ display_name: value }),
           });
           const d = await res.json();
-          if (!res.ok) throw new Error(d.error || "登録に失敗しました");
+          if (!res.ok) throw new Error(d.error || "くじ引きに失敗しました");
 
           setMyName(value);
-          showToast("参加登録しました");
+          showToast(
+            d.already_assigned
+              ? `すでに ${d.team_name} チームです`
+              : `🎉 ${d.team_name} チームに決まりました！`
+          );
           await refresh();
         } catch (e) {
           err.textContent = e.message;
           err.style.display = "block";
         } finally {
           btn.disabled = false;
-          btn.textContent = "参加する";
+          btn.textContent = "🎲 くじを引く";
         }
       }
 
@@ -310,7 +328,7 @@
       document.getElementById("teamCount").textContent = teams.length;
 
       if (teams.length === 0) {
-        teamsList.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">管理者がシャッフルを実行すると、ここにチーム分け結果と佐賀弁のひとことが表示されます。</p>`;
+        teamsList.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">まだ誰もくじを引いていません。名前を入れて「くじを引く」を押すと、ここに結果が表示されます。</p>`;
         return;
       }
 
@@ -329,8 +347,8 @@
 
           return `
             <div class="team-card"${mine ? ' style="outline:2px solid var(--c-primary); outline-offset:2px"' : ""}>
-              <h3>${escapeHtml(t.name)} チーム（${members.length} / ${t.size}名）${mine ? " ← あなた" : ""}</h3>
-              <div class="members">${membersStr || "<span style='color:var(--c-text-muted)'>メンバー未割当</span>"}</div>
+              <h3>${escapeHtml(t.name)} チーム（${members.length}名）${mine ? " ← あなた" : ""}</h3>
+              <div class="members">${membersStr || "<span style='color:var(--c-text-muted)'>まだ誰もいません</span>"}</div>
               ${commentStr}
             </div>
           `;
@@ -382,7 +400,7 @@
           <p class="subtitle">イベントコード: <strong>${escapeHtml(eventCode)}</strong>　参加者 ${participants.length} 名　チーム ${teams.length}</p>
 
           <div class="qr-wrap card">
-            <p style="margin:0 0 8px; font-weight:700; font-size:1.1rem">スマホで読み取って参加</p>
+            <p style="margin:0 0 8px; font-weight:700; font-size:1.1rem">スマホで読み取って、くじを引いてください</p>
             <img src="${escapeHtml(qrUrl)}" width="220" height="220" alt="参加用QRコード"
                  onerror="this.style.display='none'" />
             <p style="margin:8px 0 0; font-size:1rem; word-break:break-all;">${escapeHtml(joinUrl)}</p>
@@ -396,7 +414,7 @@
       if (!list) return;
 
       if (teams.length === 0) {
-        list.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">参加登録受付中です。管理者がシャッフルを実行すると結果が表示されます。</p>`;
+        list.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">まだ誰もくじを引いていません。QRを読み取って名前を入れると、ここに表示されます。</p>`;
         return;
       }
 
@@ -449,7 +467,10 @@
         <p class="subtitle">Cognito 認証済み (${escapeHtml(eventCode)})</p>
 
         <div class="card admin-card">
-          <h2 style="font-size:1.1rem; margin:0 0 12px">1. 参加者名の入力 (改行区切り)</h2>
+          <h2 style="font-size:1.1rem; margin:0 0 8px">参加者リスト</h2>
+          <p style="margin:0 0 12px; color:var(--c-text-muted); font-size:0.85rem">
+            参加者が自分でくじを引くと自動で追加されます。ここを編集して引き直すこともできます（改行区切り）。
+          </p>
           <textarea id="participantInput" class="textarea-names" placeholder="山田太郎&#10;佐藤花子&#10;佐賀次郎"></textarea>
 
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -459,7 +480,10 @@
 
           <p id="adminError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
 
-          <button type="button" id="shuffleBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 シャッフル実行</button>
+          <button type="button" id="shuffleBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 全員を引き直す</button>
+          <p style="margin:8px 0 0; color:var(--c-text-muted); font-size:0.8rem">
+            ※ 全員のチームが変わります。通常の運用では不要です。
+          </p>
         </div>
 
         <div class="card">
@@ -510,7 +534,7 @@
         .map(
           (t) => `
         <div class="team-card">
-          <h3>${escapeHtml(t.name)} チーム (${(t.members || []).length} / ${t.size}名)</h3>
+          <h3>${escapeHtml(t.name)} チーム (${(t.members || []).length}名)</h3>
           <div class="members">${(t.members || []).map((m) => `<span>${escapeHtml(m)}</span>`).join("") || "—"}</div>
           ${t.comment ? `<div class="ai-comment-badge"><span class="icon">✨</span><div>${escapeHtml(t.comment)}</div></div>` : ""}
         </div>
@@ -535,7 +559,7 @@
       const teamCount = parseInt(teamCountInput.value, 10) || 3;
 
       shuffleBtn.disabled = true;
-      shuffleBtn.textContent = "⏳ シャッフル中...";
+      shuffleBtn.textContent = "⏳ 引き直し中...";
 
       try {
         const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/admin/shuffle`, {
@@ -562,7 +586,7 @@
         adminError.style.display = "block";
       } finally {
         shuffleBtn.disabled = false;
-        shuffleBtn.textContent = "🎲 シャッフル実行";
+        shuffleBtn.textContent = "🎲 全員を引き直す";
       }
     });
 

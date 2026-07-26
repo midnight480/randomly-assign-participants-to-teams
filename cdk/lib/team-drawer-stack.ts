@@ -14,6 +14,8 @@ import * as path from "path";
 const EVENT_CODE = "JAWS-SAGA";
 const CHANNEL_NAMESPACE = "team-drawer";
 const CHANNEL = `/${CHANNEL_NAMESPACE}/shuffle`;
+/** くじ引きで最初にチームを作るときのチーム数 */
+const TEAM_COUNT = 4;
 
 export interface TeamDrawerStackProps extends StackProps {
   /** 管理者ログインのメールアドレス（Cognito ユーザー名） */
@@ -150,6 +152,7 @@ export class TeamDrawerStack extends Stack {
         APPSYNC_API_KEY: apiKey.attrApiKey,
         APPSYNC_CHANNEL: CHANNEL,
         EVENT_CODE,
+        TEAM_COUNT: String(TEAM_COUNT),
       },
       bundling: {
         minify: false,
