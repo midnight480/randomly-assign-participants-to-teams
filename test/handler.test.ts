@@ -164,6 +164,28 @@ test("上限ちょうどまでは登録できる", async () => {
   assert.equal(over.statusCode, 400);
 });
 
+test("許可されていないイベントコードへの書き込みは 404（無制限にイベントを作れない）", async () => {
+  for (const code of ["ATTACKER-1", "foo", "JAWS-SAGA2"]) {
+    const res = await handler(
+      req("POST", `/api/events/${code}/participants`, { body: { names: ["x"] } })
+    );
+    assert.equal(res.statusCode, 404, `作成できてしまった: ${code}`);
+  }
+
+  // 正規のコードは通り、大文字小文字は正規化される
+  for (const code of ["JAWS-SAGA", "jaws-saga"]) {
+    const res = await handler(
+      req("POST", `/api/events/${code}/participants`, { body: { names: ["山田"] } })
+    );
+    assert.equal(res.statusCode, 200, `拒否されてしまった: ${code}`);
+  }
+});
+
+test("許可されていないイベントコードの参照も 404", async () => {
+  const res = await handler(req("GET", "/api/events/ATTACKER-1"));
+  assert.equal(res.statusCode, 404);
+});
+
 test("参加者名が空なら 400", async () => {
   const res = await handler(
     req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: [] } })

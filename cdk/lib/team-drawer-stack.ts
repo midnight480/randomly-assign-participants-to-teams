@@ -149,6 +149,7 @@ export class TeamDrawerStack extends Stack {
         APPSYNC_REALTIME_ENDPOINT: `wss://${eventApi.realtimeDns}`,
         APPSYNC_API_KEY: apiKey.attrApiKey,
         APPSYNC_CHANNEL: CHANNEL,
+        EVENT_CODE,
       },
       bundling: {
         minify: false,
@@ -186,6 +187,15 @@ export class TeamDrawerStack extends Stack {
         backendLambda
       ),
     });
+
+    // 公開URLなので、暴走や悪意あるアクセスで Lambda / DynamoDB の課金が
+    // 際限なく伸びないよう上限を設ける。参加者300名が3秒ポーリングしても
+    // 100rps 程度なので、通常利用には十分な余裕がある。
+    const defaultStage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
+    defaultStage.defaultRouteSettings = {
+      throttlingRateLimit: 500,
+      throttlingBurstLimit: 1000,
+    };
 
     const baseUrl = api.apiEndpoint;
 

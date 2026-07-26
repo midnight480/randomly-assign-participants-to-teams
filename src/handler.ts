@@ -17,6 +17,11 @@ import * as path from "path";
 
 const cognitoClient = new CognitoIdentityProviderClient({});
 
+/** このスタックが扱うイベントコード。単発イベント用に1つへ固定する。 */
+const ALLOWED_EVENT_CODE = (process.env.EVENT_CODE || "JAWS-SAGA")
+  .trim()
+  .toUpperCase();
+
 /**
  * NodejsFunction は esbuild の出力を /var/task 直下に置き、
  * commandHooks で public/ を同じ階層にコピーする。
@@ -194,9 +199,18 @@ export async function handler(
 
     // /api/events/{code}/...
     const segments = requestPath.replace(/^\/api\//, "").split("/").filter(Boolean);
-    const eventCode = segments[1] ? decodeURIComponent(segments[1]) : "JAWS-SAGA";
+    const eventCode = segments[1]
+      ? decodeURIComponent(segments[1])
+      : ALLOWED_EVENT_CODE;
 
     if (segments[0] === "events") {
+      // 参加者登録は認証不要なので、任意のイベントコードを受け付けると
+      // 誰でも無制限に DynamoDB アイテムを作れてしまう。
+      // このスタックは単発イベント用なので、扱うコードを1つに固定する。
+      if (eventCode.trim().toUpperCase() !== ALLOWED_EVENT_CODE) {
+        return json(404, { error: "指定されたイベントは存在しません" });
+      }
+
       if (segments.length <= 2 && httpMethod === "GET") {
         return await toResult(await handleGetEvent(eventCode));
       }
