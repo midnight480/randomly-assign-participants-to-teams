@@ -38,6 +38,8 @@ npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3
 ## デプロイ
 
 管理者パスワードは環境変数で渡します（リポジトリに平文で置かないため）。
+**必ず使い捨てのパスワードを使ってください**。指定した値は CloudFormation
+テンプレートに平文で残ります（詳細は `docs/AWS_DEPLOY.md`）。
 
 ```bash
 ADMIN_PASSWORD='YourStrongPassw0rd' \
