@@ -172,21 +172,34 @@
       .catch(() => {});
   }
 
+  // 自分の表示名（端末に保存して「自分のチーム」を強調表示するのに使う）
+  function myName() {
+    try {
+      return localStorage.getItem("display_name") || "";
+    } catch (e) {
+      return "";
+    }
+  }
+  function setMyName(name) {
+    try {
+      localStorage.setItem("display_name", name);
+    } catch (e) {}
+  }
+
   // --- Render Participant View ---
   function renderParticipantPage(eventCode, data) {
     const event = data;
-    const teams = event.teams || [];
-    const totalSlots = event.total_slots || 0;
-    const assigned = event.assigned_count || 0;
 
-    let html = `
+    const html = `
       <div class="container">
         <h1>${escapeHtml(event.title || "JAWS-UG佐賀 チーム割り当て")}</h1>
         <p class="subtitle">イベントコード: <strong>${escapeHtml(eventCode)}</strong></p>
 
+        <div class="card" id="joinCard"></div>
+
         <div class="status-bar">
-          <span>割り当て済み: <strong>${assigned}</strong> / ${totalSlots} 名</span>
-          <span>チーム数: <strong>${teams.length}</strong></span>
+          <span>参加者: <strong id="participantCount">0</strong> 名</span>
+          <span>チーム数: <strong id="teamCount">0</strong></span>
         </div>
 
         <div class="card">
@@ -194,33 +207,129 @@
           <div class="teams-grid" id="teamsList"></div>
         </div>
 
-        <div style="text-align:center; margin-top:20px;">
-          <a href="/e/${encodeURIComponent(eventCode)}/admin" class="nav-link" style="display:inline-block; font-weight:bold; color:var(--c-primary)">⚙️ 管理画面（シャッフル実行・ログイン）</a>
+        <div style="text-align:center; margin-top:20px; display:flex; gap:16px; justify-content:center; flex-wrap:wrap;">
+          <a href="/e/${encodeURIComponent(eventCode)}/display" class="nav-link">📺 会場表示モード（QR）</a>
+          <a href="/e/${encodeURIComponent(eventCode)}/admin" class="nav-link">⚙️ 管理画面</a>
         </div>
       </div>
     `;
 
     document.getElementById("app").innerHTML = html;
 
+    // --- 参加登録フォーム ---
+    // 3秒ごとの自動更新でフォームを作り直すと、入力途中の文字とフォーカスが
+    // 消えてしまう。状態（未登録／登録済み）が変わったときだけ描き直す。
+    let joinCardState = null;
+
+    function renderJoinCard() {
+      const card = document.getElementById("joinCard");
+      if (!card) return;
+
+      const name = myName();
+      const joined = !!name && (event.participants || []).indexOf(name) !== -1;
+      const nextState = joined ? `joined:${name}` : "form";
+      if (nextState === joinCardState) return;
+      joinCardState = nextState;
+
+      if (joined) {
+        card.innerHTML = `
+          <p style="margin:0 0 8px">✅ <strong>${escapeHtml(name)}</strong> さんで参加登録済みです。</p>
+          <p style="margin:0; color:var(--c-text-muted); font-size:0.9rem">
+            管理者がシャッフルを実行すると、下に結果が出ます。この画面は開いたままにしてください。
+          </p>
+          <button type="button" id="changeNameBtn" class="secondary" style="margin-top:12px; padding:6px 12px; font-size:0.85rem">名前を変更する</button>
+        `;
+        const btn = document.getElementById("changeNameBtn");
+        if (btn) {
+          btn.addEventListener("click", () => {
+            setMyName("");
+            joinCardState = null; // 明示操作なので即座に描き直す
+            renderJoinCard();
+          });
+        }
+        return;
+      }
+
+      card.innerHTML = `
+        <h2 style="font-size:1.1rem; margin:0 0 12px">まず名前を登録してください</h2>
+        <label for="joinName">表示名（氏名・ニックネーム）</label>
+        <input type="text" id="joinName" maxlength="30" placeholder="例）しばお / 佐賀太郎"
+               style="width:100%; padding:10px; margin-bottom:12px; border-radius:6px; border:1px solid var(--c-border)" />
+        <p id="joinError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
+        <button type="button" id="joinBtn" style="width:100%; font-weight:bold; padding:12px;">参加する</button>
+      `;
+
+      const input = document.getElementById("joinName");
+      const btn = document.getElementById("joinBtn");
+      const err = document.getElementById("joinError");
+      if (name) input.value = name;
+
+      async function submit() {
+        const value = input.value.trim().replace(/\s+/g, " ");
+        if (!value) {
+          err.textContent = "名前を入力してください。";
+          err.style.display = "block";
+          return;
+        }
+        err.style.display = "none";
+        btn.disabled = true;
+        btn.textContent = "登録中...";
+        try {
+          const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/participants`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ names: [value] }),
+          });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.error || "登録に失敗しました");
+
+          setMyName(value);
+          showToast("参加登録しました");
+          await refresh();
+        } catch (e) {
+          err.textContent = e.message;
+          err.style.display = "block";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "参加する";
+        }
+      }
+
+      btn.addEventListener("click", submit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+      });
+    }
+
     function renderTeams() {
       const teamsList = document.getElementById("teamsList");
       if (!teamsList) return;
+
+      const teams = event.teams || [];
+      document.getElementById("participantCount").textContent = (event.participants || []).length;
+      document.getElementById("teamCount").textContent = teams.length;
 
       if (teams.length === 0) {
         teamsList.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">管理者がシャッフルを実行すると、ここにチーム分け結果と佐賀弁のひとことが表示されます。</p>`;
         return;
       }
 
+      const me = myName();
+
       teamsList.innerHTML = teams
         .map((t) => {
-          const membersStr = (t.members || []).map((m) => `<span>${escapeHtml(m)}</span>`).join("");
+          const members = t.members || [];
+          const mine = me && members.indexOf(me) !== -1;
+          const membersStr = members
+            .map((m) => `<span${m === me ? ' style="font-weight:700; text-decoration:underline"' : ""}>${escapeHtml(m)}</span>`)
+            .join("");
           const commentStr = t.comment
             ? `<div class="ai-comment-badge"><span class="icon">✨</span><div><strong>ひとこと:</strong> ${escapeHtml(t.comment)}</div></div>`
             : "";
 
           return `
-            <div class="team-card">
-              <h3>${escapeHtml(t.name)} チーム（${(t.members || []).length} / ${t.size}名）</h3>
+            <div class="team-card"${mine ? ' style="outline:2px solid var(--c-primary); outline-offset:2px"' : ""}>
+              <h3>${escapeHtml(t.name)} チーム（${members.length} / ${t.size}名）${mine ? " ← あなた" : ""}</h3>
               <div class="members">${membersStr || "<span style='color:var(--c-text-muted)'>メンバー未割当</span>"}</div>
               ${commentStr}
             </div>
@@ -229,28 +338,99 @@
         .join("");
     }
 
-    renderTeams();
-
-    // Setup polling (3s) + AppSync Realtime sync
-    let pollTimer = setInterval(() => {
-      fetchEvent(eventCode)
-        .then((newData) => {
-          event.teams = newData.teams;
-          event.assigned_count = newData.assigned_count;
-          event.total_slots = newData.total_slots;
-          renderTeams();
-        })
-        .catch(() => {});
-    }, 3000);
-
-    setupAppSyncRealtime(eventCode, () => {
-      fetchEvent(eventCode).then((newData) => {
+    async function refresh() {
+      try {
+        const newData = await fetchEvent(eventCode);
         event.teams = newData.teams;
+        event.participants = newData.participants;
         event.assigned_count = newData.assigned_count;
         event.total_slots = newData.total_slots;
+        renderJoinCard();
         renderTeams();
-        showToast("🔔 チーム分け結果が更新されました！");
-      });
+      } catch (e) {}
+    }
+
+    renderJoinCard();
+    renderTeams();
+
+    setInterval(refresh, 3000);
+
+    setupAppSyncRealtime(eventCode, () => {
+      refresh().then(() => showToast("🔔 チーム分け結果が更新されました！"));
+    });
+  }
+
+  // --- Render Venue Display View (TV / プロジェクター用) ---
+  function renderDisplayPage(eventCode, data) {
+    const event = data;
+    const joinUrl = window.location.origin + "/e/" + encodeURIComponent(eventCode);
+    // QR は外部サービスで生成する（main ブランチと同じ方式）。
+    // 読み込めなかった場合に備えて URL も大きく表示している。
+    const qrUrl =
+      "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" +
+      encodeURIComponent(joinUrl);
+
+    document.body.classList.add("display-mode");
+
+    function render() {
+      const teams = event.teams || [];
+      const participants = event.participants || [];
+
+      document.getElementById("app").innerHTML = `
+        <div class="container">
+          <h1 class="pulse">${escapeHtml(event.title || "JAWS-UG佐賀 チーム割り当て")}</h1>
+          <p class="subtitle">イベントコード: <strong>${escapeHtml(eventCode)}</strong>　参加者 ${participants.length} 名　チーム ${teams.length}</p>
+
+          <div class="qr-wrap card">
+            <p style="margin:0 0 8px; font-weight:700; font-size:1.1rem">スマホで読み取って参加</p>
+            <img src="${escapeHtml(qrUrl)}" width="220" height="220" alt="参加用QRコード"
+                 onerror="this.style.display='none'" />
+            <p style="margin:8px 0 0; font-size:1rem; word-break:break-all;">${escapeHtml(joinUrl)}</p>
+          </div>
+
+          <div class="teams-grid" id="displayTeams"></div>
+        </div>
+      `;
+
+      const list = document.getElementById("displayTeams");
+      if (!list) return;
+
+      if (teams.length === 0) {
+        list.innerHTML = `<p style="text-align:center; color:var(--c-text-muted); padding:20px;">参加登録受付中です。管理者がシャッフルを実行すると結果が表示されます。</p>`;
+        return;
+      }
+
+      list.innerHTML = teams
+        .map((t) => {
+          const members = (t.members || []).map((m) => `<span>${escapeHtml(m)}</span>`).join("");
+          const comment = t.comment
+            ? `<div class="ai-comment-badge"><span class="icon">✨</span><div>${escapeHtml(t.comment)}</div></div>`
+            : "";
+          return `
+            <div class="team-card">
+              <h3>${escapeHtml(t.name)} チーム（${(t.members || []).length}名）</h3>
+              <div class="members">${members || "—"}</div>
+              ${comment}
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    async function refresh() {
+      try {
+        const d = await fetchEvent(eventCode);
+        event.teams = d.teams;
+        event.participants = d.participants;
+        event.title = d.title;
+        render();
+      } catch (e) {}
+    }
+
+    render();
+    setInterval(refresh, 3000);
+    setupAppSyncRealtime(eventCode, () => {
+      refresh().then(() => showToast("🔔 チーム分け結果が更新されました！"));
     });
   }
 
@@ -481,17 +661,25 @@
 
     if (route.mode === "admin") {
       renderAdminPage(eventCode);
+      return;
+    }
+
+    const fallback = {
+      event_code: eventCode,
+      title: "JAWS-UG佐賀 チーム割り当て",
+      teams: [],
+      participants: [],
+    };
+
+    let eventData = fallback;
+    try {
+      eventData = await fetchEvent(eventCode);
+    } catch (e) {}
+
+    if (route.mode === "display") {
+      renderDisplayPage(eventCode, eventData);
     } else {
-      try {
-        const eventData = await fetchEvent(eventCode);
-        renderParticipantPage(eventCode, eventData);
-      } catch (e) {
-        renderParticipantPage(eventCode, {
-          event_code: eventCode,
-          title: "JAWS-UG佐賀 チーム割り当て",
-          teams: [],
-        });
-      }
+      renderParticipantPage(eventCode, eventData);
     }
   }
 

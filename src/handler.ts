@@ -159,8 +159,34 @@ async function handleLogin(rawBody: string): Promise<APIGatewayProxyStructuredRe
 
     return json(200, { token: idToken, user: { email } });
   } catch (err: any) {
-    console.error("Cognito login failed:", err);
-    return json(401, { error: "メールアドレスまたはパスワードが正しくありません" });
+    console.error("Cognito login failed:", err?.name, err?.message);
+
+    // 全ての例外を同じ文言に潰すと、設定ミス（ユーザー未作成・認証フロー未許可）と
+    // 単なるパスワード誤りが区別できず、当日に原因を追えなくなる。
+    // 管理者1名だけの単発イベント用途なので、ユーザー列挙のリスクより
+    // 診断できることを優先する。
+    switch (err?.name) {
+      case "UserNotFoundException":
+        return json(401, {
+          error:
+            "このメールアドレスのユーザーが存在しません。デプロイ時の ADMIN_EMAIL と一致しているか確認してください。",
+        });
+      case "NotAuthorizedException":
+        return json(401, { error: "パスワードが正しくありません" });
+      case "PasswordResetRequiredException":
+        return json(401, { error: "パスワードの再設定が必要です" });
+      case "UserNotConfirmedException":
+        return json(401, { error: "ユーザーが未確認の状態です" });
+      case "InvalidParameterException":
+        return json(500, {
+          error:
+            "Cognito の設定に問題があります（USER_PASSWORD_AUTH が有効か確認してください）",
+        });
+      default:
+        return json(401, {
+          error: `ログインに失敗しました (${err?.name || "UnknownError"})`,
+        });
+    }
   }
 }
 

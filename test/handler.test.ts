@@ -245,3 +245,36 @@ test("base64 エンコードされたボディを復号して扱える", async (
   assert.equal(res.statusCode, 200);
   assert.deepEqual(parse(res.body).added, ["山田"]);
 });
+
+test("会場表示モード /e/{code}/display も index.html を返す", async () => {
+  const res = await handler(req("GET", "/e/JAWS-SAGA/display"));
+  assert.equal(res.statusCode, 200);
+  assert.match(String(res.headers?.["Content-Type"]), /text\/html/);
+});
+
+test("参加者が1名ずつ自己登録できる（QR経由の参加フロー）", async () => {
+  for (const name of ["しばお", "佐賀太郎"]) {
+    const res = await handler(
+      req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: [name] } })
+    );
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(parse(res.body).added, [name]);
+  }
+
+  const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
+  const body = parse(get.body);
+  assert.deepEqual(body.participants, ["しばお", "佐賀太郎"]);
+  assert.equal(body.participant_count, 2);
+});
+
+test("同じ人が二度登録しても重複しない（連打・再読み込み対策）", async () => {
+  await handler(req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: ["しばお"] } }));
+  const second = await handler(
+    req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: ["しばお"] } })
+  );
+  assert.equal(second.statusCode, 200);
+  assert.deepEqual(parse(second.body).added, []);
+
+  const get = await handler(req("GET", "/api/events/JAWS-SAGA"));
+  assert.equal(parse(get.body).participant_count, 1);
+});
