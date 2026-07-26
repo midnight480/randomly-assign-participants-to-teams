@@ -37,11 +37,12 @@ if (!adminPassword) {
     ].join("\n")
   );
 } else {
+  // account は指定しない（アカウント非依存スタック）。
+  // CDK_DEFAULT_ACCOUNT を要求すると、認証情報が解決できないときに
+  // 「Unable to resolve AWS account to use」という原因の分かりにくい
+  // エラーで止まる。account を省けばデプロイ時の認証情報から決まる。
   new TeamDrawerStack(app, "TeamDrawerStack", {
-    env: {
-      account: process.env.CDK_DEFAULT_ACCOUNT,
-      region,
-    },
+    env: { region },
     adminEmail,
     adminPassword,
   });

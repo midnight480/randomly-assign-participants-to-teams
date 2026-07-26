@@ -355,3 +355,27 @@ test("同時に引いても誰も取りこぼされない（楽観ロック）",
   assert.equal(assigned.length, 20, "チームへの割り当てが取りこぼされた");
   assert.deepEqual([...assigned].sort(), [...names].sort());
 });
+
+test("リセット後に同じ人が引き直しても参加者が重複しない", async () => {
+  const { saveEventState, getEventState } = await import("../src/db");
+
+  await handler(req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "しばお" } }));
+
+  // 管理者のリセットはテストでは認証を通せないので、
+  // 「チームだけ消えて参加者リストが残っている」状態を直接作って再現する
+  await saveEventState("JAWS-SAGA", { teams: [], comments: {}, pattern: { teams: [] } });
+  assert.deepEqual((await getEventState("JAWS-SAGA")).participants, ["しばお"]);
+
+  const again = await handler(
+    req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "しばお" } })
+  );
+  assert.equal(again.statusCode, 200);
+
+  const state = await getEventState("JAWS-SAGA");
+  assert.deepEqual(state.participants, ["しばお"], "参加者が二重に積まれた");
+  assert.equal(
+    state.teams.flatMap((t) => t.members).filter((m) => m === "しばお").length,
+    1,
+    "チームに二重に入った"
+  );
+});

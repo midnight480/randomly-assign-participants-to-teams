@@ -172,10 +172,15 @@ export async function handleDrawTeam(
         : t
     );
 
+    // 念のため重複を弾く（リセット直後など、リストにだけ残っている場合に備える）
+    const participants = state.participants.includes(displayName)
+      ? state.participants
+      : [...state.participants, displayName];
+
     return {
       teams: nextTeams,
       comments,
-      participants: [...state.participants, displayName],
+      participants,
       pattern: { teams: nextTeams.map((t) => ({ name: t.name, size: t.size })) },
     };
   });
@@ -343,10 +348,13 @@ export async function handleResetAssignments(
     return errorResponse("管理者権限が必要です", 401);
   }
 
+  // 参加者リストも消す。残したままだと、同じ人がもう一度くじを引いたときに
+  // リストへ二重に積まれてしまう（当日リセットして仕切り直す運用で必ず踏む）。
   const saved = await saveEventState(eventCode, {
     pattern: { teams: [] },
     teams: [],
     comments: {},
+    participants: [],
   });
 
   const responsePayload = {
