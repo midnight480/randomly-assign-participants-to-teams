@@ -26,6 +26,20 @@ const eventCode = String(
   .trim()
   .toUpperCase();
 
+// 画面に出すイベント名。EVENT_CODE を JBUG-SAGA などに変えたときに
+// タイトルだけ「JAWS-UG佐賀」のまま残らないよう、ここでも差し替えられる。
+const eventTitle = String(
+  process.env.EVENT_TITLE ||
+    app.node.tryGetContext("eventTitle") ||
+    "JAWS-UG佐賀 チーム割り当て"
+).trim();
+
+if (!eventTitle || eventTitle.length > 60) {
+  throw new Error(
+    `EVENT_TITLE が不正です: "${eventTitle}"\n1文字以上・60文字以内にしてください`
+  );
+}
+
 if (!/^[A-Z0-9-]{1,32}$/.test(eventCode)) {
   throw new Error(
     `EVENT_CODE が不正です: "${eventCode}"\n` +
@@ -61,5 +75,6 @@ if (!adminPassword) {
     adminEmail,
     adminPassword,
     eventCode,
+    eventTitle,
   });
 }

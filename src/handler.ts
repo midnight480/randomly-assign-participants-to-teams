@@ -7,12 +7,16 @@ import {
   handlePostParticipants,
   handleDrawTeam,
   handleExecuteShuffle,
+  handleConfigureTeams,
+  handleRemoveParticipants,
+  handleClearParticipants,
   handleResetAssignments,
 } from "./api";
 import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { DEFAULT_TITLE } from "./db";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -218,6 +222,8 @@ export async function handler(
         // フロントがイベントコードをハードコードしなくて済むよう返す。
         // デプロイ時に EVENT_CODE を変えても画面側の修正が要らない。
         eventCode: ALLOWED_EVENT_CODE,
+        // タイトルも API から渡す。画面側に JAWS-UG 固定の文字列を残さない。
+        title: DEFAULT_TITLE,
         userPoolId: process.env.USER_POOL_ID || "",
         userPoolClientId: process.env.USER_POOL_CLIENT_ID || "",
         appsyncHttpEndpoint: process.env.APPSYNC_HTTP_ENDPOINT || "",
@@ -264,6 +270,15 @@ export async function handler(
 
         if (action === "shuffle") {
           return await toResult(await handleExecuteShuffle(eventCode, authHeader, body));
+        }
+        if (action === "teams") {
+          return await toResult(await handleConfigureTeams(eventCode, authHeader, body));
+        }
+        if (action === "remove-participants") {
+          return await toResult(await handleRemoveParticipants(eventCode, authHeader, body));
+        }
+        if (action === "clear-participants") {
+          return await toResult(await handleClearParticipants(eventCode, authHeader));
         }
         if (action === "reset") {
           return await toResult(await handleResetAssignments(eventCode, authHeader));

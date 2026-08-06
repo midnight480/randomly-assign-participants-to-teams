@@ -3,10 +3,21 @@ import { verifyAdminToken } from "./auth";
 import { publishShuffleEvent } from "./events";
 import { getEventState, saveEventState, setParticipants, updateEventState } from "./db";
 import type { EventState, Team } from "./db";
-import { normalizeDisplayName, jsonResponse, errorResponse } from "./util";
+import {
+  normalizeDisplayName,
+  normalizeTeamName,
+  jsonResponse,
+  errorResponse,
+} from "./util";
 
 /** 1イベントあたりの参加者数上限（DynamoDB のアイテムサイズ上限に対する保険） */
 export const MAX_PARTICIPANTS = 500;
+
+/** チーム数の上限。会場で見て分かる範囲＋佐賀弁の語彙数に収める */
+export const MAX_TEAMS = 20;
+
+/** チーム名の最大文字数（会場ディスプレイで折り返さない程度） */
+export const MAX_TEAM_NAME_LENGTH = 20;
 
 export const SAGA_WORDS = [
   "がばい",
@@ -61,6 +72,122 @@ export function pickRandomSagaNames(n: number, fromWords: string[] = SAGA_WORDS)
 }
 
 /**
+ * 指定されたチーム名を count 個ぶんに整える（純粋関数）。
+ *
+ * - 空欄は佐賀弁から自動命名する（既に使われている名前は避ける）
+ * - 重複はエラー。チームは名前で識別しているため、同名があると
+ *   くじ引きで 1 人が複数チームに入るなど壊れ方が分かりにくい
+ */
+export function resolveTeamNames(
+  rawNames: string[],
+  count: number
+): { names: string[]; error?: string } {
+  const requested = (rawNames || [])
+    .slice(0, count)
+    .map((n) => normalizeTeamName(n, MAX_TEAM_NAME_LENGTH));
+
+  const used = new Set(requested.filter(Boolean));
+  if (used.size !== requested.filter(Boolean).length) {
+    return { names: [], error: "チーム名が重複しています。それぞれ別の名前にしてください" };
+  }
+
+  // 自動命名は、手で付けた名前と衝突しない語だけから選ぶ
+  const auto = pickRandomSagaNames(
+    count,
+    SAGA_WORDS.filter((w) => !used.has(w))
+  );
+
+  const names: string[] = [];
+  let autoIdx = 0;
+  for (let i = 0; i < count; i++) {
+    const given = requested[i];
+    if (given) {
+      names.push(given);
+      continue;
+    }
+    let candidate = auto[autoIdx++] || `チーム${i + 1}`;
+    while (used.has(candidate)) {
+      candidate = auto[autoIdx++] || `チーム${i + 1}-${autoIdx}`;
+    }
+    used.add(candidate);
+    names.push(candidate);
+  }
+
+  return { names };
+}
+
+/**
+ * 既存のチームを保ったまま、チーム数と名前だけ差し替える（純粋関数）。
+ *
+ * 引き直しと違って全員をシャッフルし直さない。すでにくじを引いた人が
+ * 「管理者が名前を直しただけ」でチームを移されると、会場が混乱するため。
+ * チーム数を減らしたときだけ、あふれたメンバーを人数の少ないチームへ移す。
+ */
+export function applyTeamConfig(
+  currentTeams: Team[],
+  names: string[]
+): Team[] {
+  const count = names.length;
+
+  // 先頭から count 個は名前だけ差し替えて中身を引き継ぐ
+  const teams: Team[] = names.map((name, i) => {
+    const members = currentTeams[i] ? [...(currentTeams[i].members || [])] : [];
+    return { name, size: members.length, members };
+  });
+
+  // 減った分のメンバーは、そのつど一番少ないチームへ入れる（同数なら先頭）
+  const orphans = currentTeams.slice(count).flatMap((t) => t.members || []);
+  for (const member of orphans) {
+    let target = teams[0];
+    for (const t of teams) {
+      if (t.members.length < target.members.length) target = t;
+    }
+    target.members.push(member);
+    target.size = target.members.length;
+  }
+
+  return teams;
+}
+
+/**
+ * 指定した参加者を、参加者リストとチームの両方から取り除く（純粋関数）。
+ *
+ * チーム名・チーム数・ひとことコメントは触らない。当日に「間違えて2回入れた」
+ * 「テストで入れた名前が残っている」を消すための操作なので、
+ * 残った人のチームまで動いてしまうと困る。
+ */
+export function withoutParticipants(
+  teams: Team[],
+  participants: string[],
+  namesToRemove: string[]
+): { teams: Team[]; participants: string[]; removed: string[]; notFound: string[] } {
+  const targets = new Set(
+    namesToRemove.map((n) => normalizeDisplayName(n || "")).filter(Boolean)
+  );
+
+  const present = new Set([
+    ...participants,
+    ...teams.flatMap((t) => t.members || []),
+  ]);
+
+  const removed: string[] = [];
+  const notFound: string[] = [];
+  for (const name of targets) {
+    (present.has(name) ? removed : notFound).push(name);
+  }
+
+  return {
+    teams: teams.map((t) => {
+      const members = (t.members || []).filter((m) => !targets.has(m));
+      return { ...t, members, size: members.length };
+    }),
+    participants: participants.filter((p) => !targets.has(p)),
+    removed,
+    notFound,
+  };
+}
+
+/**
  * 参加者をチームへ振り分ける（純粋関数）。
  * 元の実装と同じく Fisher-Yates でシャッフルし、余りを先頭チームから 1 名ずつ配る。
  * 認証・永続化・通知から切り離してあるのでそのままテストできる。
@@ -72,10 +199,10 @@ export function buildTeams(
 ): Team[] {
   const count = Math.max(1, teamCount);
 
-  let names = teamNames;
-  if (names.length < count) {
-    names = pickRandomSagaNames(count);
-  }
+  // 指定が足りない分だけ佐賀弁で埋める。全部を捨てて付け直すと、
+  // 管理画面で 1 つだけ名前を変えたときに他の名前まで変わってしまう。
+  const resolved = resolveTeamNames(teamNames, count);
+  const names = resolved.error ? resolveTeamNames([], count).names : resolved.names;
 
   const shuffledNames = [...participants];
   for (let i = shuffledNames.length - 1; i > 0; i--) {
@@ -308,7 +435,16 @@ export async function handleExecuteShuffle(
 
   // 2. Determine team count and 3. shuffle
   const teamCount = Math.max(1, body.team_count || Math.min(4, participants.length));
-  const teams = buildTeams(participants, teamCount, body.team_names || []);
+  if (teamCount > MAX_TEAMS) {
+    return errorResponse(`チーム数は${MAX_TEAMS}までです`, 400);
+  }
+
+  const resolved = resolveTeamNames(body.team_names || [], teamCount);
+  if (resolved.error) {
+    return errorResponse(resolved.error, 400);
+  }
+
+  const teams = buildTeams(participants, teamCount, resolved.names);
 
   // 4. Attach a Saga-dialect comment per team
   const comments = generateTeamComments(teams);
@@ -337,6 +473,187 @@ export async function handleExecuteShuffle(
     message: "シャッフルが完了しました",
     ...responsePayload,
   });
+}
+
+/**
+ * チーム数とチーム名だけを変更する（引き直しはしない）。
+ *
+ * 開場前にチームを用意しておく用途と、当日「チーム名を変えたい」に応える用途を
+ * 1 つのエンドポイントで賄う。参加者が同時にくじを引いていても更新が消えないよう
+ * updateEventState（楽観ロック）で読み直してから書く。
+ */
+export async function handleConfigureTeams(
+  eventCode: string,
+  authHeader: string | null,
+  body: { team_count?: number; team_names?: string[] }
+): Promise<Response> {
+  const isAuthorized = await verifyAdminToken(authHeader);
+  if (!isAuthorized) {
+    return errorResponse("管理者権限が必要です", 401);
+  }
+
+  const rawNames = Array.isArray(body.team_names) ? body.team_names : [];
+  const count = Number(
+    body.team_count !== undefined && body.team_count !== null
+      ? body.team_count
+      : rawNames.length
+  );
+
+  if (!Number.isInteger(count) || count < 1) {
+    return errorResponse("チーム数は1以上の整数で指定してください", 400);
+  }
+  if (count > MAX_TEAMS) {
+    return errorResponse(`チーム数は${MAX_TEAMS}までです`, 400);
+  }
+
+  const resolved = resolveTeamNames(rawNames, count);
+  if (resolved.error) {
+    return errorResponse(resolved.error, 400);
+  }
+
+  const saved = await updateEventState(eventCode, (state) => {
+    const teams = applyTeamConfig(state.teams, resolved.names);
+
+    // コメントはチーム名がキー。改名しても同じ位置のチームには
+    // 同じひとことを引き継ぎ、新しく増えたチームにだけ付け直す。
+    const generated = generateTeamComments(teams);
+    const comments: Record<string, string> = {};
+    teams.forEach((t, i) => {
+      const previous = state.teams[i];
+      const carried = previous ? state.comments[previous.name] : "";
+      comments[t.name] = carried || generated[t.name];
+    });
+
+    return {
+      teams,
+      comments,
+      pattern: { teams: teams.map((t) => ({ name: t.name, size: t.size })) },
+    };
+  });
+
+  const responsePayload = {
+    event_code: saved.eventCode,
+    title: saved.title,
+    teams: saved.teams.map((t) => ({ ...t, comment: saved.comments[t.name] || "" })),
+    comments: saved.comments,
+    assigned_count: saved.participants.length,
+    updated_at: saved.updatedAt,
+  };
+
+  await publishShuffleEvent(eventCode, responsePayload);
+
+  return jsonResponse({
+    message: `チーム構成を更新しました（${saved.teams.length}チーム）`,
+    ...responsePayload,
+  });
+}
+
+/** 参加者削除後の状態を返す（個別・全員で共通） */
+function participantsResponse(saved: EventState, message: string): Response {
+  return jsonResponse({
+    message,
+    event_code: saved.eventCode,
+    title: saved.title,
+    teams: saved.teams.map((t) => ({ ...t, comment: saved.comments[t.name] || "" })),
+    comments: saved.comments,
+    assigned_count: saved.participants.length,
+    participants: saved.participants,
+    updated_at: saved.updatedAt,
+  });
+}
+
+/**
+ * 指定した参加者を削除する。チーム構成（名前・数）は変えない。
+ */
+export async function handleRemoveParticipants(
+  eventCode: string,
+  authHeader: string | null,
+  body: { names?: string[]; display_name?: string }
+): Promise<Response> {
+  const isAuthorized = await verifyAdminToken(authHeader);
+  if (!isAuthorized) {
+    return errorResponse("管理者権限が必要です", 401);
+  }
+
+  const rawNames = Array.isArray(body.names)
+    ? body.names
+    : body.display_name
+      ? [body.display_name]
+      : [];
+
+  if (rawNames.length === 0) {
+    return errorResponse("削除する参加者名を指定してください", 400);
+  }
+
+  let removed: string[] = [];
+  let notFound: string[] = [];
+
+  const saved = await updateEventState(eventCode, (state) => {
+    const next = withoutParticipants(state.teams, state.participants, rawNames);
+    removed = next.removed;
+    notFound = next.notFound;
+
+    if (next.removed.length === 0) return null; // 誰も居なければ書き込まない
+
+    return {
+      teams: next.teams,
+      participants: next.participants,
+      pattern: { teams: next.teams.map((t) => ({ name: t.name, size: t.size })) },
+    };
+  });
+
+  if (removed.length === 0) {
+    return errorResponse(
+      `該当する参加者が見つかりません（${notFound.join("、")}）`,
+      404
+    );
+  }
+
+  const responsePayload = {
+    event_code: saved.eventCode,
+    teams: saved.teams.map((t) => ({ ...t, comment: saved.comments[t.name] || "" })),
+    comments: saved.comments,
+    assigned_count: saved.participants.length,
+    updated_at: saved.updatedAt,
+  };
+  await publishShuffleEvent(eventCode, responsePayload);
+
+  const suffix = notFound.length > 0 ? `（${notFound.join("、")} は見つかりませんでした）` : "";
+  return participantsResponse(saved, `${removed.join("、")} を削除しました${suffix}`);
+}
+
+/**
+ * 参加者を全員削除する。チーム名・チーム数は残るので、
+ * 同じチーム構成のまま最初からやり直せる。
+ */
+export async function handleClearParticipants(
+  eventCode: string,
+  authHeader: string | null
+): Promise<Response> {
+  const isAuthorized = await verifyAdminToken(authHeader);
+  if (!isAuthorized) {
+    return errorResponse("管理者権限が必要です", 401);
+  }
+
+  const saved = await updateEventState(eventCode, (state) => {
+    const teams = state.teams.map((t) => ({ ...t, members: [], size: 0 }));
+    return {
+      teams,
+      participants: [],
+      pattern: { teams: teams.map((t) => ({ name: t.name, size: 0 })) },
+    };
+  });
+
+  const responsePayload = {
+    event_code: saved.eventCode,
+    teams: saved.teams.map((t) => ({ ...t, comment: saved.comments[t.name] || "" })),
+    comments: saved.comments,
+    assigned_count: 0,
+    updated_at: saved.updatedAt,
+  };
+  await publishShuffleEvent(eventCode, responsePayload);
+
+  return participantsResponse(saved, "参加者を全員削除しました（チーム構成は残しています）");
 }
 
 export async function handleResetAssignments(

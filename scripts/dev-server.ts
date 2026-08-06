@@ -66,6 +66,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`dev server: http://localhost:${PORT}/e/JAWS-SAGA`);
-  console.log(`admin      : http://localhost:${PORT}/e/JAWS-SAGA/admin`);
+  const code = (process.env.EVENT_CODE || "JAWS-SAGA").trim().toUpperCase();
+  console.log(`dev server: http://localhost:${PORT}/e/${code}`);
+  console.log(`admin      : http://localhost:${PORT}/e/${code}/admin`);
 });

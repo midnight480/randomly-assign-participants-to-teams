@@ -23,13 +23,15 @@ export interface TeamDrawerStackProps extends StackProps {
   readonly adminPassword: string;
   /** イベントコード。URL(/e/{code})とデータの保存キーになる */
   readonly eventCode: string;
+  /** 画面に表示するイベント名 */
+  readonly eventTitle: string;
 }
 
 export class TeamDrawerStack extends Stack {
   constructor(scope: Construct, id: string, props: TeamDrawerStackProps) {
     super(scope, id, props);
 
-    const { adminEmail, adminPassword, eventCode } = props;
+    const { adminEmail, adminPassword, eventCode, eventTitle } = props;
 
     // ------------------------------------------------------------------
     // 1. DynamoDB — チーム分け結果の保存先
@@ -153,6 +155,7 @@ export class TeamDrawerStack extends Stack {
         APPSYNC_API_KEY: apiKey.attrApiKey,
         APPSYNC_CHANNEL: CHANNEL,
         EVENT_CODE: eventCode,
+        EVENT_TITLE: eventTitle,
         TEAM_COUNT: String(TEAM_COUNT),
       },
       bundling: {

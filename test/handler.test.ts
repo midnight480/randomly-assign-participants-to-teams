@@ -218,6 +218,54 @@ test("でたらめなトークンでもシャッフルは通らない（fail clo
   }
 });
 
+test("認証無しのチーム構成変更は 401 で、チームが書き換わらない", async () => {
+  await handler(
+    req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "山田" } })
+  );
+  const before = parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body);
+
+  const cases: Record<string, string>[] = [
+    {},
+    { authorization: "Bearer aaaa" },
+    { authorization: "aaaa" },
+  ];
+  for (const headers of cases) {
+    const res = await handler(
+      req("POST", "/api/events/JAWS-SAGA/admin/teams", {
+        body: { team_count: 2, team_names: ["のっとり", "のっとり2"] },
+        headers,
+      })
+    );
+    assert.equal(res.statusCode, 401, `通過してしまった: ${JSON.stringify(headers)}`);
+  }
+
+  const after = parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body);
+  assert.deepEqual(
+    after.teams.map((t: { name: string }) => t.name),
+    before.teams.map((t: { name: string }) => t.name)
+  );
+});
+
+test("認証無しの参加者削除は 401 で、参加者が消えない", async () => {
+  await handler(
+    req("POST", "/api/events/JAWS-SAGA/draw", { body: { display_name: "山田" } })
+  );
+
+  for (const path of ["admin/remove-participants", "admin/clear-participants"]) {
+    const res = await handler(
+      req("POST", `/api/events/JAWS-SAGA/${path}`, {
+        body: { names: ["山田"] },
+        headers: { authorization: "Bearer aaaa" },
+      })
+    );
+    assert.equal(res.statusCode, 401, `通過してしまった: ${path}`);
+  }
+
+  const get = parse((await handler(req("GET", "/api/events/JAWS-SAGA"))).body);
+  assert.deepEqual(get.participants, ["山田"]);
+  assert.deepEqual(get.teams.flatMap((t: { members: string[] }) => t.members), ["山田"]);
+});
+
 test("認証無しのリセットは 401 で、状態を壊さない", async () => {
   await handler(
     req("POST", "/api/events/JAWS-SAGA/participants", { body: { names: ["山田"] } })

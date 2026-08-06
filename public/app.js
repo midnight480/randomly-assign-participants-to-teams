@@ -1,8 +1,10 @@
 (function () {
   const API = "/api";
   // サーバ (/api/config) から取得できなかったときだけ使うフォールバック。
-  // 通常はデプロイ時の EVENT_CODE がそのまま使われる。
-  let DEFAULT_EVENT_CODE = "JAWS-SAGA";
+  // 通常はデプロイ時の EVENT_CODE / EVENT_TITLE がそのまま使われるので、
+  // ここにイベント固有の名前は置かない。
+  let DEFAULT_EVENT_CODE = "";
+  let DEFAULT_TITLE = "チーム割り当て";
 
   // /api/config は起動時とリアルタイム購読の両方で使うので一度だけ取得する
   let configPromise = null;
@@ -204,7 +206,7 @@
 
     const html = `
       <div class="container">
-        <h1>${escapeHtml(event.title || "JAWS-UG佐賀 チーム割り当て")}</h1>
+        <h1>${escapeHtml(event.title || DEFAULT_TITLE)}</h1>
         <p class="subtitle">イベントコード: <strong>${escapeHtml(eventCode)}</strong></p>
 
         <div class="card" id="joinCard"></div>
@@ -408,7 +410,7 @@
 
       document.getElementById("app").innerHTML = `
         <div class="container">
-          <h1 class="pulse">${escapeHtml(event.title || "JAWS-UG佐賀 チーム割り当て")}</h1>
+          <h1 class="pulse">${escapeHtml(event.title || DEFAULT_TITLE)}</h1>
           <p class="subtitle">イベントコード: <strong>${escapeHtml(eventCode)}</strong>　参加者 ${participants.length} 名　チーム ${teams.length}</p>
 
           <div class="qr-wrap card">
@@ -479,29 +481,58 @@
         <p class="subtitle">Cognito 認証済み (${escapeHtml(eventCode)})</p>
 
         <div class="card admin-card">
+          <h2 style="font-size:1.1rem; margin:0 0 8px">チーム構成</h2>
+          <p style="margin:0 0 12px; color:var(--c-text-muted); font-size:0.85rem">
+            チーム数とチーム名を変更できます。<strong>引き直しはしません</strong>ので、すでにくじを引いた人のチームはそのままです。
+            名前を空欄にすると佐賀弁から自動で付けます。
+          </p>
+
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+            <label for="teamCountInput" style="margin:0">チーム数:</label>
+            <input type="number" id="teamCountInput" value="4" min="1" max="20" style="width:70px; padding:6px; font-size:1rem; border-radius:6px; border:1px solid var(--c-border)" />
+            <button type="button" id="clearNamesBtn" class="secondary" style="width:auto; padding:6px 12px; font-size:0.85rem">名前をクリア（自動命名）</button>
+          </div>
+
+          <div id="teamNameInputs" class="team-name-inputs"></div>
+
+          <p id="teamConfigError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
+
+          <button type="button" id="applyTeamsBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">💾 チーム構成を反映する</button>
+          <p style="margin:8px 0 0; color:var(--c-text-muted); font-size:0.8rem">
+            ※ チーム数を減らすと、あふれた人は人数の少ないチームへ移ります。増やしたぶんは空のまま、次にくじを引いた人から入ります。
+          </p>
+        </div>
+
+        <div class="card admin-card">
           <h2 style="font-size:1.1rem; margin:0 0 8px">参加者リスト</h2>
           <p style="margin:0 0 12px; color:var(--c-text-muted); font-size:0.85rem">
             参加者が自分でくじを引くと自動で追加されます。ここを編集して引き直すこともできます（改行区切り）。
           </p>
           <textarea id="participantInput" class="textarea-names" placeholder="山田太郎&#10;佐藤花子&#10;佐賀次郎"></textarea>
 
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <label for="teamCountInput" style="margin:0">チーム数:</label>
-            <input type="number" id="teamCountInput" value="3" min="1" max="10" style="width:70px; padding:6px; font-size:1rem; border-radius:6px; border:1px solid var(--c-border)" />
-          </div>
-
           <p id="adminError" class="error-msg" style="display:none; color:var(--c-danger); font-size:0.9rem; margin-bottom:12px;"></p>
 
           <button type="button" id="shuffleBtn" style="width:100%; font-weight:bold; padding:12px; font-size:1.05rem;">🎲 全員を引き直す</button>
           <p style="margin:8px 0 0; color:var(--c-text-muted); font-size:0.8rem">
-            ※ 全員のチームが変わります。通常の運用では不要です。
+            ※ 全員のチームが変わります（上で指定したチーム数・チーム名を使います）。通常の運用では不要です。
           </p>
         </div>
 
         <div class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
             <h2 style="font-size:1.1rem; margin:0">現在のチーム分け状況</h2>
-            <button type="button" id="resetBtn" class="secondary" style="padding:6px 12px; font-size:0.85rem">リセット</button>
+            <div style="display:flex; gap:8px;">
+              <button type="button" id="clearParticipantsBtn" class="secondary" style="width:auto; padding:6px 12px; font-size:0.85rem">参加者を全員削除</button>
+              <button type="button" id="resetBtn" class="secondary" style="width:auto; padding:6px 12px; font-size:0.85rem">リセット</button>
+            </div>
+          </div>
+          <p style="margin:0 0 12px; color:var(--c-text-muted); font-size:0.85rem">
+            名前の <strong>✕</strong> でその人だけ削除できます。「全員削除」はチーム名・チーム数を残したまま参加者だけ消します。
+            「リセット」はチーム分けごと消します（チーム名も消えます）。
+          </p>
+          <div id="unassignedWrap" style="display:none; margin-bottom:12px;">
+            <p style="margin:0 0 6px; font-size:0.9rem; color:var(--c-text-muted)">まだチームに入っていない参加者</p>
+            <div id="unassignedList" class="members"></div>
           </div>
           <div id="adminTeamsList" class="teams-grid"></div>
         </div>
@@ -519,16 +550,97 @@
     const teamCountInput = document.getElementById("teamCountInput");
     const shuffleBtn = document.getElementById("shuffleBtn");
     const resetBtn = document.getElementById("resetBtn");
+    const clearParticipantsBtn = document.getElementById("clearParticipantsBtn");
+    const unassignedWrap = document.getElementById("unassignedWrap");
+    const unassignedList = document.getElementById("unassignedList");
     const logoutBtn = document.getElementById("logoutBtn");
     const adminError = document.getElementById("adminError");
     const adminTeamsList = document.getElementById("adminTeamsList");
+    const teamNameInputs = document.getElementById("teamNameInputs");
+    const applyTeamsBtn = document.getElementById("applyTeamsBtn");
+    const clearNamesBtn = document.getElementById("clearNamesBtn");
+    const teamConfigError = document.getElementById("teamConfigError");
+
+    // --- チーム構成（チーム数・チーム名）---------------------------------
+    // 参加者リストと同じく、サーバの値へ自動で追従させたいが、
+    // 管理者が編集を始めたら上書きしない。
+    let teamConfigEdited = false;
+
+    function currentTeamCount() {
+      const n = parseInt(teamCountInput.value, 10);
+      if (!n || n < 1) return 1;
+      return Math.min(n, 20);
+    }
+
+    function readTeamNames() {
+      return Array.from(teamNameInputs.querySelectorAll("input")).map((el) =>
+        el.value.trim()
+      );
+    }
+
+    /** count 行ぶんの入力欄を作る。すでに入っている値は残す。 */
+    function renderTeamNameInputs(count, values) {
+      const kept = values || readTeamNames();
+      const focusedIndex = Array.from(teamNameInputs.querySelectorAll("input")).indexOf(
+        document.activeElement
+      );
+
+      teamNameInputs.innerHTML = Array.from({ length: count }, (_, i) => {
+        const value = kept[i] || "";
+        return `
+          <div class="team-name-row">
+            <label for="teamName${i}">${i + 1}</label>
+            <input type="text" id="teamName${i}" maxlength="20" value="${escapeHtml(value)}"
+                   placeholder="（空欄で佐賀弁から自動命名）" />
+          </div>
+        `;
+      }).join("");
+
+      teamNameInputs.querySelectorAll("input").forEach((el) => {
+        el.addEventListener("input", () => {
+          teamConfigEdited = true;
+        });
+      });
+
+      if (focusedIndex >= 0) {
+        const next = teamNameInputs.querySelectorAll("input")[focusedIndex];
+        if (next) next.focus();
+      }
+    }
+
+    teamCountInput.addEventListener("input", () => {
+      teamConfigEdited = true;
+      // 入力途中で全消しされた瞬間に1行へ潰さない
+      if (teamCountInput.value.trim() === "") return;
+      if (currentTeamCount() !== parseInt(teamCountInput.value, 10)) {
+        teamCountInput.value = currentTeamCount(); // 1〜20 に収める
+      }
+      renderTeamNameInputs(currentTeamCount());
+    });
+
+    clearNamesBtn.addEventListener("click", () => {
+      teamConfigEdited = true;
+      renderTeamNameInputs(currentTeamCount(), []);
+    });
+
+    /** サーバの現状をチーム構成の入力欄へ反映する（編集中は触らない） */
+    function syncTeamConfig(teams) {
+      if (teamConfigEdited) return;
+      if (teamNameInputs.contains(document.activeElement)) return;
+      if (document.activeElement === teamCountInput) return;
+      if (!teams || teams.length === 0) return;
+
+      teamCountInput.value = teams.length;
+      renderTeamNameInputs(teams.length, teams.map((t) => t.name));
+    }
+
+    renderTeamNameInputs(currentTeamCount(), []);
 
     // 「全員を引き直す」はテキストエリアの内容でサーバ側の参加者を置き換える。
     // 開いた時点のリストを持ち続けると、その後にくじを引いた人が引き直しで消える。
     // そのため定期的にサーバの値へ追従させる。ただし管理者が手で編集した場合と
     // 入力中（フォーカス中）は上書きしない。
     let lastServerList = "";
-    let teamCountInitialized = false;
 
     function loadCurrentState() {
       fetchEvent(eventCode)
@@ -543,18 +655,25 @@
           }
           lastServerList = serverList;
 
-          // チーム数はポーリングのたびに上書きすると入力中の値が戻ってしまう
-          if (!teamCountInitialized && data.teams && data.teams.length > 0) {
-            teamCountInput.value = data.teams.length;
-            teamCountInitialized = true;
-          }
-
-          renderAdminTeams(data.teams || []);
+          syncTeamConfig(data.teams || []);
+          renderAdminTeams(data.teams || [], data.participants || []);
         })
         .catch(() => {});
     }
 
-    function renderAdminTeams(teams) {
+    /** 削除ボタン付きの参加者バッジ */
+    function memberChip(name) {
+      return `<span class="member-chip">${escapeHtml(name)}<button type="button" class="member-del"
+        data-name="${escapeHtml(name)}" title="${escapeHtml(name)} を削除" aria-label="${escapeHtml(name)} を削除">✕</button></span>`;
+    }
+
+    function renderAdminTeams(teams, participants) {
+      // くじを引かずに参加者リストにだけ載っている人（管理者が手で足した場合など）
+      const assigned = new Set(teams.flatMap((t) => t.members || []));
+      const unassigned = (participants || []).filter((p) => !assigned.has(p));
+      unassignedWrap.style.display = unassigned.length > 0 ? "block" : "none";
+      unassignedList.innerHTML = unassigned.map(memberChip).join("");
+
       if (teams.length === 0) {
         adminTeamsList.innerHTML = `<p style="color:var(--c-text-muted)">まだチーム分けが実行されていません。</p>`;
         return;
@@ -564,7 +683,7 @@
           (t) => `
         <div class="team-card">
           <h3>${escapeHtml(t.name)} チーム (${(t.members || []).length}名)</h3>
-          <div class="members">${(t.members || []).map((m) => `<span>${escapeHtml(m)}</span>`).join("") || "—"}</div>
+          <div class="members">${(t.members || []).map(memberChip).join("") || "—"}</div>
           ${t.comment ? `<div class="ai-comment-badge"><span class="icon">✨</span><div>${escapeHtml(t.comment)}</div></div>` : ""}
         </div>
       `
@@ -572,9 +691,81 @@
         .join("");
     }
 
+    /** 参加者を削除する（個別）。3秒ごとの再描画でボタンが作り直されるため委譲で拾う */
+    async function removeParticipant(name) {
+      if (!confirm(`${name} さんを削除しますか？`)) return;
+      try {
+        const res = await fetch(
+          `${API}/events/${encodeURIComponent(eventCode)}/admin/remove-participants`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${adminToken}`,
+            },
+            body: JSON.stringify({ names: [name] }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "削除に失敗しました");
+
+        showToast(data.message || `${name} さんを削除しました`);
+        renderAdminTeams(data.teams || [], data.participants || []);
+        loadCurrentState();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function onDeleteClick(e) {
+      const btn = e.target.closest(".member-del");
+      if (!btn) return;
+      removeParticipant(btn.dataset.name);
+    }
+    adminTeamsList.addEventListener("click", onDeleteClick);
+    unassignedList.addEventListener("click", onDeleteClick);
+
     loadCurrentState();
     // 開場中は参加者が増え続けるので、管理画面も自動で追従させる
     setInterval(loadCurrentState, 3000);
+
+    applyTeamsBtn.addEventListener("click", async () => {
+      teamConfigError.style.display = "none";
+      const count = currentTeamCount();
+      const names = readTeamNames();
+
+      applyTeamsBtn.disabled = true;
+      applyTeamsBtn.textContent = "⏳ 反映中...";
+
+      try {
+        const res = await fetch(`${API}/events/${encodeURIComponent(eventCode)}/admin/teams`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ team_count: count, team_names: names }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "チーム構成の更新に失敗しました");
+
+        showToast(data.message || "チーム構成を更新しました");
+        // 自動命名された名前をそのまま入力欄へ戻す
+        teamConfigEdited = false;
+        renderTeamNameInputs(
+          (data.teams || []).length,
+          (data.teams || []).map((t) => t.name)
+        );
+        loadCurrentState(); // 参加者リストも含めて描き直す
+      } catch (err) {
+        teamConfigError.textContent = err.message;
+        teamConfigError.style.display = "block";
+      } finally {
+        applyTeamsBtn.disabled = false;
+        applyTeamsBtn.textContent = "💾 チーム構成を反映する";
+      }
+    });
 
     shuffleBtn.addEventListener("click", async () => {
       adminError.style.display = "none";
@@ -587,7 +778,9 @@
         return;
       }
 
-      const teamCount = parseInt(teamCountInput.value, 10) || 3;
+      // 引き直しでも、上のチーム構成で指定した数と名前をそのまま使う
+      const teamCount = currentTeamCount();
+      const teamNames = readTeamNames();
 
       shuffleBtn.disabled = true;
       shuffleBtn.textContent = "⏳ 引き直し中...";
@@ -602,6 +795,7 @@
           body: JSON.stringify({
             participant_names: names,
             team_count: teamCount,
+            team_names: teamNames,
           }),
         });
 
@@ -611,7 +805,12 @@
         }
 
         showToast("✨ チーム分けが完了しました！");
-        renderAdminTeams(data.teams || []);
+        teamConfigEdited = false;
+        renderTeamNameInputs(
+          (data.teams || []).length,
+          (data.teams || []).map((t) => t.name)
+        );
+        loadCurrentState(); // 参加者リストも含めて描き直す
       } catch (err) {
         adminError.textContent = err.message;
         adminError.style.display = "block";
@@ -621,8 +820,31 @@
       }
     });
 
+    clearParticipantsBtn.addEventListener("click", async () => {
+      if (!confirm("参加者を全員削除しますか？（チーム名・チーム数は残ります）")) return;
+      clearParticipantsBtn.disabled = true;
+      try {
+        const res = await fetch(
+          `${API}/events/${encodeURIComponent(eventCode)}/admin/clear-participants`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${adminToken}` },
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "削除に失敗しました");
+
+        showToast(data.message || "参加者を全員削除しました");
+        loadCurrentState();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        clearParticipantsBtn.disabled = false;
+      }
+    });
+
     resetBtn.addEventListener("click", async () => {
-      if (!confirm("チーム分け結果をリセットしますか？")) return;
+      if (!confirm("チーム分け結果をリセットしますか？（チーム名も消えます）")) return;
       try {
         await fetch(`${API}/events/${encodeURIComponent(eventCode)}/admin/reset`, {
           method: "POST",
@@ -711,9 +933,12 @@
 
   // Initial Route Handler
   async function init() {
-    // デプロイ時の EVENT_CODE を採用する。URL に /e/{code} があればそちらが優先。
+    // デプロイ時の EVENT_CODE / EVENT_TITLE を採用する。
+    // URL に /e/{code} があればコードはそちらが優先。
     const config = await getConfig();
     if (config.eventCode) DEFAULT_EVENT_CODE = config.eventCode;
+    if (config.title) DEFAULT_TITLE = config.title;
+    document.title = `くじ引き - ${DEFAULT_TITLE}`;
 
     const route = parseRoute(getPath());
     const eventCode = route.eventCode;
@@ -725,7 +950,7 @@
 
     const fallback = {
       event_code: eventCode,
-      title: "JAWS-UG佐賀 チーム割り当て",
+      title: DEFAULT_TITLE,
       teams: [],
       participants: [],
     };

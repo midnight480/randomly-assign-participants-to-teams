@@ -29,7 +29,12 @@ export interface EventState {
   version: number;
 }
 
-const DEFAULT_TITLE = "JAWS-UG佐賀 チーム割り当て";
+/**
+ * 画面に出すイベント名。デプロイ時の EVENT_TITLE で差し替えられる。
+ * EVENT_CODE を JBUG-SAGA などに変えたとき、タイトルだけ「JAWS-UG佐賀」の
+ * まま残らないようにするための逃げ道。
+ */
+export const DEFAULT_TITLE = process.env.EVENT_TITLE || "JAWS-UG佐賀 チーム割り当て";
 
 function normalizeCode(eventCode: string): string {
   return eventCode.trim().toUpperCase();
