@@ -1,4 +1,4 @@
-# AWS デプロイ手順（AWS-Optimize ブランチ）
+# AWS デプロイ手順（AWS-Lambda-Web-Function ブランチ）
 
 JAWS-UG佐賀 ワークショップ用。管理者がシャッフルを実行し、参加者は公開URLで結果を閲覧する。
 
@@ -6,7 +6,8 @@ JAWS-UG佐賀 ワークショップ用。管理者がシャッフルを実行し
 
 | 役割 | サービス |
 |---|---|
-| 画面配信 + API | API Gateway HTTP API (`$default` ステージ) → Lambda |
+| 画面配信 + API | Lambda Web Functions（HomeRegion エンドポイント） |
+| コード置き場 | S3（バージョニング有効） |
 | データ保存 | DynamoDB（1イベント = 1アイテム） |
 | 管理者認証 | Cognito User Pool（USER_PASSWORD_AUTH） |
 | リアルタイム更新 | AppSync Events（チャンネル `/team-drawer/shuffle`） |
@@ -15,13 +16,14 @@ JAWS-UG佐賀 ワークショップ用。管理者がシャッフルを実行し
 
 ## 前提
 
-- Node.js 20 以上
+- Node.js 22 以上
+- aws-cdk-lib 2.274.0 以上（Web Functions の L1 `CfnWebFunction*` が入っている版）
 - AWS 認証情報が設定済み（`aws sts get-caller-identity` が通ること）
 - 対象リージョンで CDK ブートストラップ済み
 
 ```bash
 npm install
-npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3   # 初回のみ
+npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-1   # 初回のみ
 ```
 
 ## デプロイ
@@ -43,7 +45,8 @@ npm run cdk:deploy
 | `ADMIN_PASSWORD` | （必須） | 管理者パスワード |
 | `ADMIN_EMAIL` | `admin@jaws-ug-saga.example.com` | 管理者のログインID |
 | `EVENT_CODE` | `JAWS-SAGA` | イベントコード。URL とデータの保存キー |
-| `APP_REGION` | `ap-northeast-3` | デプロイ先リージョン |
+| `EVENT_TITLE` | `JAWS-UG佐賀 チーム割り当て` | 画面に表示するイベント名 |
+| `APP_REGION` | `ap-northeast-1` | デプロイ先リージョン |
 
 `EVENT_CODE` を変えると DynamoDB 上では別キーになるため、
 まっさらな状態から始まる（旧データは残るが読み書きとも 404）。
@@ -63,10 +66,12 @@ npm run cdk:deploy
 
 ## リージョンの切り替え
 
-既定は **ap-northeast-3 (Osaka)**。AppSync Events が未提供などで失敗した場合は東京へ:
+既定は **ap-northeast-1 (Tokyo)**。Lambda Web Functions は大阪（ap-northeast-3）では
+提供されていないため、`AWS-Optimize` ブランチの既定だった大阪からは外した。
+提供リージョン（2026年10月時点: バージニア北部・オハイオ・オレゴン・東京・アイルランド）なら切り替えられる:
 
 ```bash
-APP_REGION=ap-northeast-1 ADMIN_PASSWORD='...' npm run cdk:deploy
+APP_REGION=us-west-2 ADMIN_PASSWORD='...' npm run cdk:deploy
 ```
 
 切り替え箇所は `cdk/bin/app.ts` の `region` のみ。
@@ -506,3 +511,52 @@ $ grep -c "SuperSecret123" cdk.out/TeamDrawerStack.template.json
 - **HTTP API を使う理由**: REST API は URL が `/prod/...` になり、フロントの絶対パス（`/api/...`, `/styles.css`）が届かなくなる。`$default` ステージならパスにステージ名が入らない。
 - **Cognito の恒久パスワード**: `CfnUserPoolUser` だけでは `FORCE_CHANGE_PASSWORD` のままログインできないため、`AwsCustomResource` で `AdminSetUserPassword` を実行している。
 - **AppSync Events のフォールバック**: 参加者画面は WebSocket 購読に加えて 3 秒ポーリングも併用しているため、リアルタイム通知が落ちても結果は反映される。
+
+## フェーズ7: Lambda Web Functions への載せ替え（2026-10-21）
+
+API Gateway HTTP API + Lambda の構成を、Lambda Web Functions に載せ替えた。
+デプロイ先は東京（ap-northeast-1）。大阪のスタックは削除済み。
+
+### 構成の変更点
+
+- API Gateway をやめ、Web Function のエンドポイント（`HomeRegion` / `ApplicationManaged`）で公開する。
+  管理者 API の認証は従来どおりアプリ内で Cognito の ID トークンを検証する
+- API Gateway のスロットリング（500 rps）は、エンドポイントの `rateLimit: 500` に置き換えた。
+  あわせて `maxEnvironments: 5` で実行環境の数にも上限を掛けている
+- CDK の L2 はまだ無いため、L1（`CfnWebFunction` / `CfnWebFunctionRevision` / `CfnWebFunctionEndpoint`）で組んだ
+- コードは「バージョニング有効」の S3 バケットに zip で置く決まりがある。
+  CDK ブートストラップのバケットにはポリシーを足せない（上書きになる）ため、専用バケットを作り、
+  `BucketDeployment`（`extract: false`）で zip を置いている
+- リビジョンのプロパティはすべて作成時のみ指定できる。コードが変わると zip のキー（アセットハッシュ）が変わり、
+  リビジョンが作り直され、エンドポイントの重みも新しいリビジョンに切り替わる。
+  CloudFormation では自動デプロイモードを指定できないため、重み 100 で明示している
+- アプリ側は `src/server.ts`（node:http）がリクエストを API Gateway v2 のイベント形式に詰め替え、既存の `handler` に渡す。
+  ルーティング・認証・テストはそのまま使える。`scripts/dev-server.ts` もこのサーバを使うように寄せた
+
+### つまずいた点: `require.main === module` では起動しない
+
+最初は `src/server.ts` の末尾で `require.main === module` のときだけ listen していた。
+ローカルで `node index.js` を叩くと動くが、Web Functions では全リクエストが約10秒後に 502 になった。
+ログには次のエラーが出ていた。
+
+```
+Application.TimeoutListenError: nothing was listening on 0.0.0.0:3000 within 9000ms.
+```
+
+ランタイムは自前の起動処理から `index.js` を読み込むため、`require.main` が `index.js` を指さない。
+起動処理を `src/main.ts` に分け、読み込まれたら必ず listen するようにして解決した。
+
+### 検証状況
+
+| 項目 | 状態 |
+|---|---|
+| `npm test`（69件） | ✅ 全パス |
+| 東京へのデプロイ | ✅ 成功 |
+| 参加者画面・静的ファイル | ✅ 200 |
+| `/api/config` | ✅ イベントコード・タイトル・AppSync 設定を返す |
+| 管理者ログイン（Cognito） | ✅ トークン取得 |
+| くじ引き → 参加者全員削除 | ✅ DynamoDB への書き込みと削除を確認 |
+| 不正なトークンでの管理 API | ✅ 401 |
+| AppSync Events への publish | ✅ ログで確認 |
+| 応答時間（温まった状態） | 0.1〜0.2 秒 |
+| ブラウザ・スマホでの実機確認 | 未実施 |

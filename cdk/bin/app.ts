@@ -1,14 +1,22 @@
 import * as cdk from "aws-cdk-lib";
+import * as fs from "fs";
+import * as path from "path";
 import { TeamDrawerStack } from "../lib/team-drawer-stack";
+
+// パスワードなどはリポジトリ直下の .env（.gitignore 済み）に置ける。
+// シェルで指定した環境変数のほうが優先される。
+const envFile = path.join(__dirname, "../../.env");
+if (fs.existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 const app = new cdk.App();
 
 // リージョンはここ 1 箇所で切り替える。
-// 既定は ap-northeast-3 (Osaka)。AppSync Events 未提供などで deploy に失敗したら
-//   APP_REGION=ap-northeast-1 npm run cdk:deploy
-// で東京に切り替える。
+// 既定は ap-northeast-1 (Tokyo)。Lambda Web Functions は大阪 (ap-northeast-3) では
+// 提供されていないため、Web Functions 対応リージョンを指定すること。
 const region =
-  process.env.APP_REGION || app.node.tryGetContext("region") || "ap-northeast-3";
+  process.env.APP_REGION || app.node.tryGetContext("region") || "ap-northeast-1";
 
 const adminEmail =
   process.env.ADMIN_EMAIL ||

@@ -3,7 +3,8 @@
 参加者を任意のチーム数にランダム振り分けする「くじ引き」サービス。
 JAWS-UG佐賀 ワークショップ向けに、**管理者がシャッフルを実行 → 参加者は公開URLで結果を閲覧**する構成。
 
-> このブランチ（`AWS-Optimize`）は AWS 上で動く構成です。
+> このブランチ（`AWS-Lambda-Web-Function`）は、API Gateway + Lambda の構成（`AWS-Optimize` ブランチ）を
+> Lambda Web Functions に載せ替えた版です。
 > Cloudflare Workers / D1 版は `main` ブランチを参照してください。
 
 ## 機能
@@ -30,7 +31,8 @@ JAWS-UG佐賀 ワークショップ向けに、**管理者がシャッフルを�
 
 | 役割 | サービス |
 |---|---|
-| 画面配信 + API | API Gateway HTTP API（`$default` ステージ）→ Lambda |
+| 画面配信 + API | Lambda Web Functions（HomeRegion エンドポイント） |
+| コード置き場 | S3（バージョニング有効。Web Functions の決まり） |
 | データ保存 | DynamoDB（1イベント = 1アイテム） |
 | 管理者認証 | Cognito User Pool（`USER_PASSWORD_AUTH`） |
 | リアルタイム更新 | AppSync Events（チャンネル `/team-drawer/shuffle`） |
@@ -45,9 +47,9 @@ flowchart TB
         A["管理者<br/>/e/JAWS-SAGA/admin"]
     end
 
-    subgraph aws["AWS ap-northeast-3 Osaka"]
-        APIGW["API Gateway HTTP API<br/>$default ステージ / throttle 500rps"]
-        L["Lambda Node.js 22<br/>API + 静的ファイル配信"]
+    subgraph aws["AWS ap-northeast-1 Tokyo"]
+        APIGW["Web Function エンドポイント<br/>HomeRegion / rateLimit 500rps"]
+        L["Lambda Web Function Node.js 24<br/>API + 静的ファイル配信"]
         DDB[("DynamoDB<br/>1イベント = 1アイテム<br/>version で楽観ロック")]
         COG["Cognito User Pool<br/>管理者認証"]
         EV["AppSync Events<br/>/team-drawer/shuffle"]
@@ -67,8 +69,11 @@ flowchart TB
 
 **ポイント**
 
-- 静的ファイル（HTML/CSS/JS）も Lambda が配信するため、CloudFront や S3 は使いません。単発イベント用の割り切りです
-- API Gateway は **HTTP API の `$default` ステージ**。REST API だと URL が `/prod/...` になり、フロントの絶対パスが届かなくなります
+- 静的ファイル（HTML/CSS/JS）も Web Function が配信するため、CloudFront は使いません。単発イベント用の割り切りです
+- API Gateway は使いません。Web Function のエンドポイントが HTTPS の URL を持ち、流量の上限（`rateLimit`）もそこで掛けます
+- Web Functions は「ポートで待ち受ける HTTP サーバ」を動かす仕組みです。`src/server.ts` がリクエストを API Gateway v2 のイベント形式に詰め替えて、従来の `handler` に渡します。ルーティングと認証の処理は変えていません
+- 1つの実行環境が複数のリクエストを同時に処理します。QR を読んだ参加者が一斉にくじを引いても、コールドスタートが起きにくくなります
+- Web Functions は大阪リージョン（ap-northeast-3）では提供されていないため、東京にデプロイします
 - リアルタイム更新は AppSync Events の **WebSocket プッシュ**。通知はトリガーにするだけで、**画面に出すデータは必ず API から取り直します**（第三者が publish しても偽データが出ない）
 - 3秒ポーリングを併用しているため、WebSocket が繋がらなくても結果は反映されます
 
@@ -159,7 +164,7 @@ sequenceDiagram
 
 ```bash
 npm install
-npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-3   # 初回のみ
+npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-1   # 初回のみ
 ```
 
 ## デプロイ
@@ -174,6 +179,14 @@ ADMIN_EMAIL='admin@example.com' \
 npm run cdk:deploy
 ```
 
+毎回指定するのが面倒なら、リポジトリ直下の `.env`（`.gitignore` 済み）に書いておけます。
+`cdk/bin/app.ts` が起動時に読み込みます。シェルで同じ変数を指定した場合は、そちらが優先されます。
+
+```bash
+cp .env.example .env   # 値を入れてから
+npm run cdk:deploy
+```
+
 完了後、`ParticipantUrl` と `AdminUrl` が出力されます。
 
 ### デプロイ時に指定できる環境変数
@@ -184,7 +197,7 @@ npm run cdk:deploy
 | `ADMIN_EMAIL` | `admin@jaws-ug-saga.example.com` | 管理者のログインID（Cognito ユーザー名） |
 | `EVENT_CODE` | `JAWS-SAGA` | イベントコード。URL `/e/{code}` とデータの保存キー |
 | `EVENT_TITLE` | `JAWS-UG佐賀 チーム割り当て` | 画面に表示するイベント名（60文字以内） |
-| `APP_REGION` | `ap-northeast-3` | デプロイ先リージョン |
+| `APP_REGION` | `ap-northeast-1` | デプロイ先リージョン（Web Functions の提供リージョンに限る） |
 
 別コミュニティで使い回す例（`JAWS-SAGA` → `JBUG-SAGA`）:
 
@@ -206,11 +219,14 @@ npm run cdk:deploy
 旧コードのデータは残りますが読み書きとも 404 になるので、
 当日の朝にコードを変えて再デプロイすれば、テストデータの消し忘れを気にせずに済みます。
 
-リージョン既定は **ap-northeast-3 (Osaka)**。切り替えは `APP_REGION` のみ:
+リージョン既定は **ap-northeast-1 (Tokyo)**。切り替えは `APP_REGION` のみ:
 
 ```bash
-APP_REGION=ap-northeast-1 ADMIN_PASSWORD='...' npm run cdk:deploy
+APP_REGION=us-west-2 ADMIN_PASSWORD='...' npm run cdk:deploy
 ```
+
+Web Functions の提供リージョンは、2026年10月時点でバージニア北部・オハイオ・オレゴン・東京・アイルランドの5つです。
+大阪（ap-northeast-3）は対象外なので、指定するとデプロイに失敗します。
 
 詳細な手順・設計判断・実装ログは [`docs/AWS_DEPLOY.md`](docs/AWS_DEPLOY.md) を参照。
 
@@ -280,8 +296,10 @@ Cognito はローカルに無いため、管理者操作（シャッフル・リ
 
 ```
 ├── public/           # 静的ファイル（HTML, CSS, JS）
-├── src/              # Lambda（API ルーティング・DynamoDB 操作・認証）
-│   ├── handler.ts    #   エントリポイント（ルーティング / 静的配信）
+├── src/              # Web Function（API ルーティング・DynamoDB 操作・認証）
+│   ├── main.ts       #   エントリポイント（AWS_LAMBDA_HTTP_ENDPOINT で listen）
+│   ├── server.ts     #   HTTP リクエストを handler に渡すサーバ
+│   ├── handler.ts    #   ルーティング / 静的配信
 │   ├── api.ts        #   チーム分けロジック・エンドポイント実装
 │   ├── db.ts         #   DynamoDB アクセス
 │   ├── auth.ts       #   Cognito ID トークン検証
